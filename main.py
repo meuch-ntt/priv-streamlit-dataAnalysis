@@ -6,6 +6,8 @@ import seaborn as sns
 import plotly.express as px
 import matplotlib.dates as mdates
 import plotting
+import openpyxl
+
 
 
 # Set the page config
@@ -22,7 +24,8 @@ working_dir = os.path.dirname(os.path.abspath(__file__))
 folder_path = f"{working_dir}/data"  # Update this to your folder path
 
 # List all files in the folder
-files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
+##files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
+files = [f for f in os.listdir(folder_path) if f.endswith(('.csv', '.xlsx'))]
 
 # Dropdown to select a file
 selected_file = st.selectbox('Select a file', files, index=None)
@@ -30,9 +33,19 @@ selected_file = st.selectbox('Select a file', files, index=None)
 if selected_file:
     # Construct the full path to the file
     file_path = os.path.join(folder_path, selected_file)
-
-    # Read the selected CSV file
-    df = pd.read_csv(file_path)
+    
+    if selected_file.endswith('.xlsx'):
+        # Load the Excel file
+        xls = pd.ExcelFile(file_path)
+        
+        # Dropdown to select a sheet
+        sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
+        
+        if sheet_name:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+    else:
+        # Read CSV file
+        df = pd.read_csv(file_path)
 
     columns = df.columns.tolist()
 
@@ -49,7 +62,11 @@ if selected_file:
     # Concatenate the head DataFrame and the data types row
     combined_df = pd.concat([pd.DataFrame(dtypes_row).T,head_df])
 
-    st.write(combined_df)
+    # Apply styling to highlight the first row (data types) in yellow
+    def highlight_first_row(s):
+        return ["background-color: lightyellow" if s.name == "Type" else "" for _ in s]
+    
+    st.dataframe(combined_df.style.apply(highlight_first_row, axis=1))
 
 
     ##################################################################################
@@ -118,6 +135,13 @@ if selected_file:
             # Concatenate the head DataFrame and the data types row
             combined_df = pd.concat([pd.DataFrame(dtypes_row).T, head_df])
 
+            # Apply styling to highlight the first row (data types) in yellow
+            def highlight_first_row(s):
+                return ["background-color: lightyellow" if s.name == "Type" else "" for _ in s]
+            
+            st.dataframe(combined_df.style.apply(highlight_first_row, axis=1))
+
+
             # Store in session state to persist across reruns
             st.session_state.lastState = combined_df
 
@@ -127,11 +151,6 @@ if selected_file:
             st.error(f"❌ Error changing type: {e}")
         except Exception as e:
             st.error(f"❌ An unexpected error occurred: {e}")
-
-    # ✅ Display lastState only if changes were made
-    if st.session_state.lastState is not None:
-        st.markdown("**📊 Updated table**")  # Bold heading with emoji
-        st.write(st.session_state.lastState)
 
 
     ##################################################################################
@@ -147,6 +166,9 @@ if selected_file:
     x_axis = st.selectbox('Select the X-axis', options=columns + ["None"])
     y_axis = st.selectbox('Select the Y-axis', options=columns + ["None"])
 
+
+    aggregation_functions = ["sum","average","count"]
+    z_axis = "None"
     plot_list = []  
 
     if x_axis != "None" and y_axis != "None":
@@ -166,6 +188,11 @@ if selected_file:
         elif (x_dtype == 'datetime64[ns]' ):
             plot_list.append('Line Chart')  
 
+        elif ( x_dtype == 'category' ) and (y_dtype == 'object' ):
+            # Allow the user to select columns for plotting
+            z_axis = st.selectbox('Select the aggregation funtion', options=aggregation_functions + ["None"])
+            plot_list.append('Bar Chart')  
+
 
     # If none have been selected, reset the plot list.
     if x_axis == "None" or y_axis == "None":
@@ -180,10 +207,31 @@ if selected_file:
         fig, ax = plt.subplots(figsize=(6, 4))
 
 
-        if plot_type == 'Bar Chart':
+        if plot_type == 'Bar Chart' and z_axis == "count":
+
+            #plotting.bar_count(df,x_axis, plot_type, aggregation_functions)
+
+            # Group by x_axis and count occurrences in y_axis
+            count_df = df.groupby(x_axis).size().reset_index(name='count')
+            count_df = count_df.sort_values(by='count', ascending=False)
+
+            # Plot the barplot with count
+            sns.barplot(x=count_df[x_axis], y=count_df['count'], ax=ax)
+
+            # Rotate x-axis labels vertically
+            ax.tick_params(axis='x', rotation=90)  # Rotate labels 90 degrees
+
+            # Optionally, you can also display the count on top of the bars for better clarity
+            for p in ax.patches:
+                ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()), 
+                            ha='center', va='center', fontsize=12, color='black', xytext=(0, 5), textcoords='offset points')
+
+
+        elif plot_type == 'Bar Chart' and z_axis != "count":
             sns.barplot(x=df[x_axis], y=df[y_axis], ax=ax)
         elif plot_type == 'Box Chart':
-            sns.boxplot(x=df[x_axis], y=df[y_axis], ax=ax)  
+            a=2
+            ##sns.boxplot(x=df[x_axis], y=df[y_axis], ax=ax)  
         elif plot_type == "Pie Chart":
             pie_data = df.groupby(x_axis)[y_axis].sum()  # Aggregate values
             ax.pie(pie_data, labels=pie_data.index, autopct="%1.1f%%", startangle=90, colors=sns.color_palette("pastel"))
