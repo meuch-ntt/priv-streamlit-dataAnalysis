@@ -16,7 +16,10 @@ st.set_page_config(page_title='Data Visualizer',
                    page_icon='📊')
 
 # Title
-st.title('📊  Data Visualizer')
+st.title('📈  Data Visualizer')
+
+##################################################################################
+# selecting the fil
 
 working_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -51,7 +54,10 @@ if selected_file:
 
     st.write("")
 
-    st.header("Data Preview")
+##################################################################################
+# Check Type and primary statistics 
+
+    st.header("🔍 Data Preview")
 
     head_df = df.head()
     dtypes_series = df.dtypes
@@ -75,7 +81,7 @@ if selected_file:
     import pandas as pd
 
     # Assuming df is your pandas DataFrame and columns is a list of column names
-    st.header('Changing the Type')
+    st.header('🔧 Changing the Type')
 
 
     # Initialize lastState in session state
@@ -154,13 +160,98 @@ if selected_file:
 
 
     ##################################################################################
-    # Create Visualisation 
-    st.header('Creating Visualisations')
+    # --- START OF KPI SECTION (Modified Display Logic) ---
 
-        # Assuming df is your pandas DataFrame and columns is a list of column names
+    st.header('🔢 Key Performance Indicators (KPIs)')
 
+    # Initialize df_dtypes... (rest of the setup code remains here)
     if 'df_dtypes' not in st.session_state:
-        st.session_state.df_dtypes = df.dtypes.to_dict()  # Initialize with current dtypes
+        try:
+            st.session_state.df_dtypes = df.dtypes.to_dict()
+        except NameError:
+            st.error("Error: DataFrame 'df' is not loaded or defined yet. Cannot calculate KPIs.")
+            st.stop() 
+
+    # Allow the user to select the column
+    select_options = ["--- Select a Field ---"] + columns
+    kpi_column = st.selectbox('Select the field for KPI calculation', 
+                            options=select_options, 
+                            key='kpi_field_auto')
+
+    if kpi_column == "--- Select a Field ---":
+        st.info("Please select a data field above to view its key statistics.")
+
+    elif kpi_column in columns:
+        
+        kpi_dtype = st.session_state.df_dtypes.get(kpi_column, df[kpi_column].dtype)
+
+        if kpi_dtype == 'int64' or kpi_dtype == 'float64':
+            
+            # 1. Define the KPI functions and calculate
+            kpi_calculations = {
+                'Count': df[kpi_column].count(),
+                'Sum': df[kpi_column].sum(),
+                'Mean': df[kpi_column].mean(),
+                'Median': df[kpi_column].median(),
+                'Min': df[kpi_column].min(),
+                'Max': df[kpi_column].max()
+            }
+            
+            # Convert the dictionary to a list of (title, result) tuples
+            kpi_list = list(kpi_calculations.items())
+
+            # 2. Display Metrics in two rows for better spacing
+
+            # ROW 1:  (3 columns)
+            col1, col2, col3 = st.columns(3)
+            cols_row1 = [col1, col2, col3]
+            
+            for i in range(3):
+                title, result = kpi_list[i]
+                
+                # Formatting (using commas and 2 decimal places)
+                if isinstance(result, (float, int)):
+                    display_value = f"{result:,.2f}" 
+                else:
+                    display_value = str(result)
+                
+                with cols_row1[i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+            # ROW 2: Min, Max (2 columns)
+            col4, col5, col6 = st.columns(3)
+            cols_row2 = [col4, col5, col6]
+
+            for i in range(3):
+                # i starts at 0, so we access kpi_list items 3 and 4
+                title, result = kpi_list[i + 3] 
+                
+                # Formatting
+                if isinstance(result, (float, int)):
+                    # If numbers are huge, you might consider formatting them differently,
+                    # e.g., scientific notation or fewer decimals, but sticking to the current format
+                    display_value = f"{result:,.2f}" 
+                else:
+                    display_value = str(result)
+                
+                with cols_row2[i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+        else:
+            st.warning(f"The column '{kpi_column}' is not numeric ({kpi_dtype}). Select a numeric field for KPIs.")
+            
+    # --- END OF KPI SECTION ---
+
+
+    ##################################################################################
+    # Create Visualisation 
+    st.header('📊 Charts & Visuals')
+
+    # Assuming df is your pandas DataFrame and columns is a list of column names
+
+    # Initialize with current dtypes
+    if 'df_dtypes' not in st.session_state:
+        st.session_state.df_dtypes = df.dtypes.to_dict()  
 
     # Allow the user to select columns for plotting
     x_axis = st.selectbox('Select the X-axis', options=columns + ["None"])
@@ -176,6 +267,7 @@ if selected_file:
         x_dtype = st.session_state.df_dtypes.get(x_axis, df[x_axis].dtype)
         y_dtype = st.session_state.df_dtypes.get(y_axis, df[y_axis].dtype)
 
+        #possible plots depending on data type
         if x_dtype == 'category' and (y_dtype == 'int64' or y_dtype == 'float64'):
             plot_list.append('Bar Chart')  # Add Bar Chart if conditions are metplot_list.append('Bar Chart') 
             plot_list.append('Pie Chart') 

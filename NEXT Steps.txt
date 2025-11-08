@@ -1,0 +1,16 @@
+Customizable part for kpis
+- Count non null, Count null
+
+kpis for type date, min max...
+
+first Show section KPI & Visuals when checked the type
+
+DONE
+number of rows in section data preview
+
+logos for each section
+
+
+
+
+
