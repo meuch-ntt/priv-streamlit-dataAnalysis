@@ -1,12 +1,24 @@
+// SKIP if you see ".venv" already available in folder structure
 python3 -m venv .venv
 
+// ALWAYS active venv. Check: in VSC, command line starts with (.venv) 
+//if debug needed  for PSSecurityException -> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 .venv\Scripts\activate
 
-pip install streamlit pandas matplotlib seaborn notebook
+// if cloned from github with .venv alreay there -> would be corrupted 
+// delete it and install it through requirements 
+deactivate
+Remove-Item -Recurse -Force .venv
 
+python -m venv .venv
+.venv\Scripts\activate
+
+// Requirement file is there, install packages as described in requirements file
+pip install -r requirements.txt
+
+// SKIP, used to generate requirement file
+pip install streamlit pandas matplotlib seaborn notebook
 pip freeze > requirements.txt
 
+// RUN app
 streamlit run main.py
-
-
-
