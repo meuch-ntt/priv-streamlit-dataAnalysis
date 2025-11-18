@@ -1,5 +1,16 @@
-// SKIP if you see ".venv" already available in folder structure
-python3 -m venv .venv
+------------
+env created, modules installed, ONLY run app
+------------
+cd priv*
+.venv\Scripts\activate
+streamlit run main.py
+
+
+------------
+First Time
+------------
+// SKIP if you see folder ".venv"
+python -m venv .venv
 
 // ALWAYS active venv. Check: in VSC, command line starts with (.venv) 
 //if debug needed  for PSSecurityException -> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
