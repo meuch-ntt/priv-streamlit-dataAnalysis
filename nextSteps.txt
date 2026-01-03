@@ -1,0 +1,33 @@
+// FUNCTION Charts 
+naming colliding, too much text : product category vs unit solds as barchart 
+
+// FUNCTION Chart LOGIC
+when choosing product category and product name -> third dimension appears. not correct.
+new dimension should appear if numerical!! 
+not only Count, also sum and average
+
+
+ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
+    -doesnt distinguish between numerical/ float/ in, for him all numericals 
+    - remove type category -> consider object instead 
+
+
+// Functions
+first Show section KPI & Visuals when checked the type
+
+
+//DONE
+PUSH 01-03-2026
+GOING LIVE ChatGPT1 
+
+PUSH 01-03-2026
+FUNCTION: kpis Section finalized: DATE and Category added. Same structure/ Naming
+  when changing type -> change type in the table view
+
+
+logos for each section
+
+
+
+
+
