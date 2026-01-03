@@ -1,6 +1,9 @@
-// Function change data types of fields automatically, not asking user to change by themselves
+// Coding 
+XYZ, first tell me the changes in code, second gimme full revised code  
 
+// Function change data types of fields automatically, not asking user to change by themselves
 I am devepoling webapp for data analysis using streamlit. This is code for main.py. Change Code to autodetect data type of fields instead of giving user the option to change the type by themselves. Change the type of the fields accordingly in the loaded table. make only needed changes 
 
 // Optimization - Launch/ GO LIVE
 I am devepoling webapp for data analysis using streamlit. I ented to use the code for professional purposes. help This is code for main.py.  
+

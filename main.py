@@ -8,148 +8,175 @@ import matplotlib.dates as mdates
 import plotting
 import openpyxl
 
-
+from pandas.api.types import (
+    is_numeric_dtype,
+    is_datetime64_any_dtype,
+    is_categorical_dtype,
+    is_object_dtype,
+)
 
 # Set the page config
 st.set_page_config(page_title='Data Visualizer',
                    layout='centered',
                    page_icon='📊')
 
-# Title
 st.title('📈  Data Visualizer')
 
 ##################################################################################
-# selecting the fil
+# selecting the file
 
 working_dir = os.path.dirname(os.path.abspath(__file__))
+folder_path = f"{working_dir}/data"
 
-# Specify the folder where your CSV files are located
-folder_path = f"{working_dir}/data"  # Update this to your folder path
-
-# List all files in the folder
-##files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
 files = [f for f in os.listdir(folder_path) if f.endswith(('.csv', '.xlsx'))]
-
-# Dropdown to select a file
 selected_file = st.selectbox('Select a file', files, index=None)
 
 if selected_file:
-    # Construct the full path to the file
     file_path = os.path.join(folder_path, selected_file)
-    
-    if selected_file.endswith('.xlsx'):
-        # Load the Excel file
-        xls = pd.ExcelFile(file_path)
-        
-        # Dropdown to select a sheet
-        sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
-        
-        if sheet_name:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
-    else:
-        # Read CSV file
-        df = pd.read_csv(file_path)
 
+    # --- persist df in session state ---
+    if "df" not in st.session_state:
+        st.session_state.df = None
+    if "loaded_file" not in st.session_state:
+        st.session_state.loaded_file = None
+    if "loaded_sheet" not in st.session_state:
+        st.session_state.loaded_sheet = None
+
+    # ✅ metadata ONLY for semantic overrides like "date"
+    if "col_semantic_types" not in st.session_state:
+        st.session_state.col_semantic_types = {}
+
+    def _reset_semantic_types():
+        # reset on new dataset to avoid carrying settings to unrelated files
+        st.session_state.col_semantic_types = {}
+
+    if selected_file.endswith('.xlsx'):
+        xls = pd.ExcelFile(file_path)
+        sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
+
+        if sheet_name:
+            is_new_dataset = (
+                st.session_state.df is None
+                or st.session_state.loaded_file != selected_file
+                or st.session_state.loaded_sheet != sheet_name
+            )
+            if is_new_dataset:
+                st.session_state.df = pd.read_excel(xls, sheet_name=sheet_name)
+                st.session_state.loaded_file = selected_file
+                st.session_state.loaded_sheet = sheet_name
+                _reset_semantic_types()
+        else:
+            st.stop()
+
+    else:
+        is_new_dataset = (
+            st.session_state.df is None
+            or st.session_state.loaded_file != selected_file
+            or st.session_state.loaded_sheet is not None
+        )
+        if is_new_dataset:
+            st.session_state.df = pd.read_csv(file_path)
+            st.session_state.loaded_file = selected_file
+            st.session_state.loaded_sheet = None
+            _reset_semantic_types()
+
+    df = st.session_state.df
     columns = df.columns.tolist()
 
     st.write("")
 
-##################################################################################
-# Check Type and primary statistics 
 
+
+##################################################################################
+# Data Preview (placeholder so it updates in-place)
+    st.markdown('<div id="data-preview"></div>', unsafe_allow_html=True)
     st.header("🔍 Data Preview")
 
-    head_df = df.head()
-    dtypes_series = df.dtypes
-
-    # Create a new row with the data types
-    dtypes_row = pd.Series(dtypes_series.values, index=head_df.columns, name="Type")
-
-    # Concatenate the head DataFrame and the data types row
-    combined_df = pd.concat([pd.DataFrame(dtypes_row).T,head_df])
-
-    # Apply styling to highlight the first row (data types) in yellow
     def highlight_first_row(s):
         return ["background-color: lightyellow" if s.name == "Type" else "" for _ in s]
-    
-    st.dataframe(combined_df.style.apply(highlight_first_row, axis=1))
 
+    def render_preview(current_df: pd.DataFrame):
+        head_df_local = current_df.head().copy()
 
-    ##################################################################################
+        # ✅ display formatting: show date-only without "00:00:00"
+        for c in head_df_local.columns:
+            if st.session_state.col_semantic_types.get(c) == "date":
+                s = pd.to_datetime(head_df_local[c], errors="coerce")
+                head_df_local[c] = s.dt.strftime("%Y-%m-%d")
 
+        # Type row: pandas dtype except if semantic "date"
+        display_types = []
+        for c in head_df_local.columns:
+            if st.session_state.col_semantic_types.get(c) == "date":
+                display_types.append("date")
+            else:
+                display_types.append(str(current_df[c].dtype))
 
-    import pandas as pd
+        dtypes_row_local = pd.Series(display_types, index=head_df_local.columns, name="Type")
+        combined_df_local = pd.concat([pd.DataFrame(dtypes_row_local).T, head_df_local])
+        return combined_df_local.style.apply(highlight_first_row, axis=1)
 
-    # Assuming df is your pandas DataFrame and columns is a list of column names
+    preview_placeholder = st.empty()
+    preview_placeholder.dataframe(render_preview(df))
+
+##################################################################################
+# Changing the Type (no extra table here)
+
     st.header('🔧 Changing the Type')
 
-
-    # Initialize lastState in session state
     if 'lastState' not in st.session_state:
-        st.session_state.lastState = None  # Default to None initially
+        st.session_state.lastState = None
 
-    # ⚠️ Display lastState only if changes were made
     if st.session_state.lastState is None:
-        st.warning("⚠️ In order to make changes: select the column(s) and desired type then confirm ")  # Updated warning message
+        st.warning("⚠️ In order to make changes: select the column(s) and desired type then confirm ")
 
+    col1, col2, col3 = st.columns([3, 3, 1.5])
 
-    # Adjust column width to align button correctly with dropdowns
-    col1, col2, col3 = st.columns([3, 3, 1.5])  # Adjusted button column width
-
-    # Initialize session state for df_dtypes if not already present
-    if 'df_dtypes' not in st.session_state:
-        st.session_state.df_dtypes = df.dtypes.to_dict()  # Initialize with current dtypes
-
-
-
-    # Column selection
     with col1:
         choose_cols = st.multiselect('Change the type of specific columns', options=columns)
 
-    # Type selection with default empty value if user hasn't made input yet
     with col2:
-        possible_types = ['int64', 'float64', 'bool', 'datetime64[ns]', 'timedelta64[ns]', 'category']
-        choose_type = st.selectbox('Set type to:', options=[""] + possible_types, index=0)  # Default empty
+        possible_types = ['int64', 'float64', 'bool', 'datetime', 'date', 'category']
+        choose_type = st.selectbox(
+            'Set type to:',
+            options=possible_types,
+            index=None,
+            placeholder="Choose an option"
+        )
 
-    # Fix button alignment and add controlled spacing
+
     with col3:
-        st.markdown("<div style='margin-bottom: 6px; font-weight: bold;'>Confirm</div>", unsafe_allow_html=True)  # Adjusted spacing
-        change_type_clicked = st.button("Change Type")  # Button right under the text
+        st.markdown("<div style='margin-bottom: 6px; font-weight: bold;'>Confirm</div>", unsafe_allow_html=True)
+        change_type_clicked = st.button("Change Type")
 
-
-
-    # Ensure both column(s) and type are selected
     if choose_cols and choose_type and change_type_clicked:
         try:
             for col in choose_cols:
                 if choose_type == 'category':
-                    df[col] = df[col].astype('category')
-                    
+                    st.session_state.df[col] = st.session_state.df[col].astype('category')
+                    # category is a real dtype; no semantic override needed
+                    st.session_state.col_semantic_types.pop(col, None)
+
+                elif choose_type == 'datetime':
+                    st.session_state.df[col] = pd.to_datetime(st.session_state.df[col], errors='coerce')
+                    st.session_state.col_semantic_types.pop(col, None)
+
+                elif choose_type == 'date':
+                    dt = pd.to_datetime(st.session_state.df[col], errors='coerce')
+                    st.session_state.df[col] = dt.dt.normalize()  # keep datetime dtype, but date semantics
+                    st.session_state.col_semantic_types[col] = "date"
+
                 else:
-                    df[col] = df[col].astype(choose_type)
+                    st.session_state.df[col] = st.session_state.df[col].astype(choose_type)
+                    st.session_state.col_semantic_types.pop(col, None)
 
-                # Update session state with the new dtype
-                st.session_state.df_dtypes[col] = choose_type
+            df = st.session_state.df
 
-            # ✅ Show success message when type change is confirmed
             st.success(f"✅ Column(s) '{', '.join(choose_cols)}' type successfully changed to '{choose_type}'.")
 
-            # Create a new row with the updated data types
-            dtypes_series = pd.Series(st.session_state.df_dtypes)
-            dtypes_row = pd.Series(dtypes_series.values, index=head_df.columns, name="Type")
-
-            # Concatenate the head DataFrame and the data types row
-            combined_df = pd.concat([pd.DataFrame(dtypes_row).T, head_df])
-
-            # Apply styling to highlight the first row (data types) in yellow
-            def highlight_first_row(s):
-                return ["background-color: lightyellow" if s.name == "Type" else "" for _ in s]
-            
-            st.dataframe(combined_df.style.apply(highlight_first_row, axis=1))
-
-
-            # Store in session state to persist across reruns
-            st.session_state.lastState = combined_df
+            # ✅ Update Data Preview in-place (no new table below)
+            preview_placeholder.dataframe(render_preview(df))
+            st.session_state.lastState = True
 
         except ValueError as e:
             st.error(f"❌ Error changing type: {e}")
@@ -158,37 +185,26 @@ if selected_file:
         except Exception as e:
             st.error(f"❌ An unexpected error occurred: {e}")
 
-
-    ##################################################################################
-    # --- START OF KPI SECTION (Modified Display Logic) ---
+##################################################################################
+# --- KPI SECTION ---
 
     st.header('🔢 Key Performance Indicators (KPIs)')
 
-    # Initialize df_dtypes... (rest of the setup code remains here)
-    if 'df_dtypes' not in st.session_state:
-        try:
-            st.session_state.df_dtypes = df.dtypes.to_dict()
-        except NameError:
-            st.error("Error: DataFrame 'df' is not loaded or defined yet. Cannot calculate KPIs.")
-            st.stop() 
-
-    # Allow the user to select the column
     select_options = ["--- Select a Field ---"] + columns
-    kpi_column = st.selectbox('Select the field for KPI calculation', 
-                            options=select_options, 
-                            key='kpi_field_auto')
+    kpi_column = st.selectbox('Select the field for KPI calculation',
+                              options=select_options,
+                              key='kpi_field_auto')
 
     if kpi_column == "--- Select a Field ---":
         st.info("Please select a data field above to view its key statistics.")
 
     elif kpi_column in columns:
-        
-        kpi_dtype = st.session_state.df_dtypes.get(kpi_column, df[kpi_column].dtype)
+        s0 = df[kpi_column]
+        semantic = st.session_state.col_semantic_types.get(kpi_column)
 
-        if kpi_dtype == 'int64' or kpi_dtype == 'float64':
-
-            s = df[kpi_column]
-
+        # NUMERIC
+        if is_numeric_dtype(s0):
+            s = s0
             valid_count = int(s.notna().sum())
             missing_count = int(s.isna().sum())
 
@@ -203,255 +219,165 @@ if selected_file:
 
             kpi_list = list(kpi_calculations.items())
 
-            # ROW 1 (3 columns): Valid, Missing, Sum
             col1, col2, col3 = st.columns(3)
-            cols_row1 = [col1, col2, col3]
-
             for i in range(3):
                 title, result = kpi_list[i]
-
-                if isinstance(result, (float)):
-                    display_value = f"{result:,.2f}"
-                else:
-                    display_value = str(result)
-
-                with cols_row1[i]:
+                display_value = f"{result:,.2f}" if isinstance(result, float) else str(result)
+                with [col1, col2, col3][i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
-            # ROW 2 (3 columns): Min, Max, Mean
             col4, col5, col6 = st.columns(3)
-            cols_row2 = [col4, col5, col6]
-
             for i in range(3):
                 title, result = kpi_list[i + 3]
-
-                if isinstance(result, (float, int)):
-                    display_value = f"{result:,.2f}"
-                else:
-                    display_value = str(result)
-
-                with cols_row2[i]:
+                display_value = f"{result:,.2f}" if isinstance(result, (float, int)) else str(result)
+                with [col4, col5, col6][i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
-
-
-        # --- DATE KPIs ---
-        elif (
-            "datetime64" in str(kpi_dtype)
-            or str(kpi_dtype) == "datetime64[ns]"
-            or str(kpi_dtype) == "datetime64[ns, UTC]"
-            or kpi_dtype == "object"  # try-parse objects as dates
-        ):
-            # Try to coerce to datetime (safe for datetime cols too)
-            s = pd.to_datetime(df[kpi_column], errors="coerce")
-
+        # DATE / DATETIME (semantic "date" OR real datetime dtype OR parseable object)
+        elif semantic == "date" or is_datetime64_any_dtype(s0) or is_object_dtype(s0):
+            s = pd.to_datetime(s0, errors="coerce")
             valid = s.dropna()
-            missing_count = s.isna().sum()
+            missing_count = int(s.isna().sum())
 
             if valid.empty:
-                st.warning(
-                    f"Column '{kpi_column}' looks like a date field, but no valid dates could be parsed."
-                )
+                st.warning(f"Column '{kpi_column}' looks like a date/datetime field, but no valid dates could be parsed.")
             else:
                 min_dt = valid.min()
                 max_dt = valid.max()
-                span_days = (max_dt - min_dt).days
-                unique_dates = valid.dt.date.nunique()
+                span_days = int((max_dt - min_dt).days)
+                unique_dates = int(valid.dt.date.nunique())
 
-                # Optional: most frequent date (mode)
-                mode_date = valid.dt.date.mode()
-                mode_date_value = mode_date.iloc[0] if not mode_date.empty else None
+                # If semantic date, show dates only, else show timestamps
+                min_disp = min_dt.date() if semantic == "date" else min_dt
+                max_disp = max_dt.date() if semantic == "date" else max_dt
 
-                # KPI calculations (dates displayed nicely)
                 kpi_calculations = {
                     "Count (valid)": int(valid.shape[0]),
-                    "Missing": int(missing_count),
-                    "Unique": int(unique_dates),
-                    "Min": min_dt.date(),
-                    "Max": max_dt.date(),
-                    "Span (days)": int(span_days),
+                    "Missing": missing_count,
+                    "Unique": unique_dates,
+                    "Min": min_disp,
+                    "Max": max_disp,
+                    "Span (days)": span_days,
                 }
-
-
-                # If you want a 7th metric (to fill 2 rows of 3 + 3 nicely, you already have 6)
-                # You can swap one in or display it below:
-                # kpi_calculations["Most common date"] = mode_date_value
 
                 kpi_list = list(kpi_calculations.items())
 
-                # ROW 1 (3 columns)
                 col1, col2, col3 = st.columns(3)
-                cols_row1 = [col1, col2, col3]
-
                 for i in range(3):
                     title, result = kpi_list[i]
-                    display_value = str(result)
-                    with cols_row1[i]:
-                        st.metric(label=f"{title} of {kpi_column}", value=display_value)
+                    with [col1, col2, col3][i]:
+                        st.metric(label=f"{title} of {kpi_column}", value=str(result))
 
-                # ROW 2 (3 columns)
                 col4, col5, col6 = st.columns(3)
-                cols_row2 = [col4, col5, col6]
-
                 for i in range(3):
                     title, result = kpi_list[i + 3]
-                    display_value = str(result)
-                    with cols_row2[i]:
-                        st.metric(label=f"{title} of {kpi_column}", value=display_value)
+                    with [col4, col5, col6][i]:
+                        st.metric(label=f"{title} of {kpi_column}", value=str(result))
 
-                # Optional extra info (mode)
-                if mode_date_value is not None:
-                    st.caption(f"Most common date: {mode_date_value}")
-
-        # --- CATEGORY KPIs ---
-        elif str(kpi_dtype) == "category":
-
-            s = df[kpi_column]
-
-            valid_count = int(s.notna().sum())
-            missing_count = int(s.isna().sum())
-            unique_count = int(s.nunique(dropna=True))
-
+        # CATEGORY
+        elif is_categorical_dtype(s0):
+            s = s0
             kpi_calculations = {
-                "Count (valid)": valid_count,
-                "Missing": missing_count,
-                "Unique": unique_count,
+                "Count (valid)": int(s.notna().sum()),
+                "Missing": int(s.isna().sum()),
+                "Unique": int(s.nunique(dropna=True)),
             }
 
             kpi_list = list(kpi_calculations.items())
-
-            # Single row (3 columns)
             col1, col2, col3 = st.columns(3)
-            cols = [col1, col2, col3]
-
             for i in range(3):
                 title, result = kpi_list[i]
-
-                # Counts should never be formatted
-                display_value = str(result)
-
-                with cols[i]:
-                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
-
-
+                with [col1, col2, col3][i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=str(result))
 
         else:
-            st.warning(f"The column '{kpi_column}' is not numeric ({kpi_dtype}). Select a numeric field for KPIs.")
-            
-    # --- END OF KPI SECTION ---
+            st.warning(f"The column '{kpi_column}' is not a supported type for KPIs (dtype={df[kpi_column].dtype}).")
 
+##################################################################################
+# Charts & Visuals
 
-    ##################################################################################
-    # Create Visualisation 
     st.header('📊 Charts & Visuals')
 
-    # Assuming df is your pandas DataFrame and columns is a list of column names
-
-    # Initialize with current dtypes
-    if 'df_dtypes' not in st.session_state:
-        st.session_state.df_dtypes = df.dtypes.to_dict()  
-
-    # Allow the user to select columns for plotting
     x_axis = st.selectbox('Select the X-axis', options=columns + ["None"])
     y_axis = st.selectbox('Select the Y-axis', options=columns + ["None"])
 
-
-    aggregation_functions = ["sum","average","count"]
+    aggregation_functions = ["sum", "average", "count"]
     z_axis = "None"
-    plot_list = []  
+    plot_list = []
 
     if x_axis != "None" and y_axis != "None":
-        # Get dtypes from session state, or default to df.dtypes if not available
-        x_dtype = st.session_state.df_dtypes.get(x_axis, df[x_axis].dtype)
-        y_dtype = st.session_state.df_dtypes.get(y_axis, df[y_axis].dtype)
+        x_s = df[x_axis]
+        y_s = df[y_axis]
 
-        #possible plots depending on data type
-        if x_dtype == 'category' and (y_dtype == 'int64' or y_dtype == 'float64'):
-            plot_list.append('Bar Chart')  # Add Bar Chart if conditions are metplot_list.append('Bar Chart') 
-            plot_list.append('Pie Chart') 
-            plot_list.append('Box Chart') 
+        x_sem = st.session_state.col_semantic_types.get(x_axis)
 
-        elif (x_dtype == 'int64' or x_dtype == 'float64') and (y_dtype == 'int64' or y_dtype == 'float64'):
-            plot_list.append('Scatter Plot')  
-            plot_list.append('Line Chart')  
+        if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
+            plot_list.extend(['Bar Chart', 'Pie Chart', 'Box Chart'])
 
-        elif (x_dtype == 'datetime64[ns]' ):
-            plot_list.append('Line Chart')  
+        elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
+            plot_list.extend(['Scatter Plot', 'Line Chart'])
 
-        elif ( x_dtype == 'category' ) and (y_dtype == 'object' ):
-            # Allow the user to select columns for plotting
+        elif x_sem == "date" or is_datetime64_any_dtype(x_s):
+            plot_list.append('Line Chart')
+
+        elif is_categorical_dtype(x_s) and is_object_dtype(y_s):
             z_axis = st.selectbox('Select the aggregation funtion', options=aggregation_functions + ["None"])
-            plot_list.append('Bar Chart')  
+            plot_list.append('Bar Chart')
 
-
-    # If none have been selected, reset the plot list.
     if x_axis == "None" or y_axis == "None":
         plot_list = ['Line Chart', 'Scatter Plot', 'Distribution Plot', 'Count Plot']
 
     plot_type = st.selectbox('Select the type of plot', options=plot_list)
 
-
-    # Generate the plot based on user selection
     if st.button('Generate Plot'):
-
         fig, ax = plt.subplots(figsize=(6, 4))
 
-
         if plot_type == 'Bar Chart' and z_axis == "count":
-
-            #plotting.bar_count(df,x_axis, plot_type, aggregation_functions)
-
-            # Group by x_axis and count occurrences in y_axis
             count_df = df.groupby(x_axis).size().reset_index(name='count')
             count_df = count_df.sort_values(by='count', ascending=False)
-
-            # Plot the barplot with count
             sns.barplot(x=count_df[x_axis], y=count_df['count'], ax=ax)
+            ax.tick_params(axis='x', rotation=90)
 
-            # Rotate x-axis labels vertically
-            ax.tick_params(axis='x', rotation=90)  # Rotate labels 90 degrees
-
-            # Optionally, you can also display the count on top of the bars for better clarity
             for p in ax.patches:
-                ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()), 
-                            ha='center', va='center', fontsize=12, color='black', xytext=(0, 5), textcoords='offset points')
-
+                ax.annotate(f'{int(p.get_height())}',
+                            (p.get_x() + p.get_width() / 2., p.get_height()),
+                            ha='center', va='center', fontsize=12, color='black',
+                            xytext=(0, 5), textcoords='offset points')
 
         elif plot_type == 'Bar Chart' and z_axis != "count":
             sns.barplot(x=df[x_axis], y=df[y_axis], ax=ax)
+
         elif plot_type == 'Box Chart':
-            a=2
-            ##sns.boxplot(x=df[x_axis], y=df[y_axis], ax=ax)  
+            # sns.boxplot(x=df[x_axis], y=df[y_axis], ax=ax)
+            pass
+
         elif plot_type == "Pie Chart":
-            pie_data = df.groupby(x_axis)[y_axis].sum()  # Aggregate values
-            ax.pie(pie_data, labels=pie_data.index, autopct="%1.1f%%", startangle=90, colors=sns.color_palette("pastel"))
+            pie_data = df.groupby(x_axis)[y_axis].sum()
+            ax.pie(pie_data, labels=pie_data.index, autopct="%1.1f%%", startangle=90,
+                   colors=sns.color_palette("pastel"))
 
         elif plot_type == 'Line Chart':
-            if(x_dtype == 'datetime64[ns]'):
-                plotting.create_lineChart_Date(df,x_axis, y_axis, ax)
+            if st.session_state.col_semantic_types.get(x_axis) == "date" or is_datetime64_any_dtype(df[x_axis]):
+                plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
             else:
                 sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
+
         elif plot_type == 'Scatter Plot':
             sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
 
-
         elif plot_type == 'Distribution Plot':
             sns.histplot(df[x_axis], kde=True, ax=ax)
-            y_axis='Density'
+            y_axis = 'Density'
+
         elif plot_type == 'Count Plot':
             sns.countplot(x=df[x_axis], ax=ax)
             y_axis = 'Count'
 
+        ax.tick_params(axis='x', labelsize=10)
+        ax.tick_params(axis='y', labelsize=10)
 
-                   
-        # Adjust label sizes
-        ax.tick_params(axis='x', labelsize=10)  # Adjust x-axis label size
-        ax.tick_params(axis='y', labelsize=10)  # Adjust y-axis label size
-
-        # Adjust title and axis labels with a smaller font size
         plt.title(f'{plot_type} of {y_axis} vs {x_axis}', fontsize=12)
         plt.xlabel(x_axis, fontsize=10)
         plt.ylabel(y_axis, fontsize=10)
 
-        # Show the results
         st.pyplot(fig)
