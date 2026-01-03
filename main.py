@@ -186,56 +186,154 @@ if selected_file:
         kpi_dtype = st.session_state.df_dtypes.get(kpi_column, df[kpi_column].dtype)
 
         if kpi_dtype == 'int64' or kpi_dtype == 'float64':
-            
-            # 1. Define the KPI functions and calculate
+
+            s = df[kpi_column]
+
+            valid_count = int(s.notna().sum())
+            missing_count = int(s.isna().sum())
+
             kpi_calculations = {
-                'Count': df[kpi_column].count(),
-                'Sum': df[kpi_column].sum(),
-                'Mean': df[kpi_column].mean(),
-                'Median': df[kpi_column].median(),
-                'Min': df[kpi_column].min(),
-                'Max': df[kpi_column].max()
+                "Count (valid)": valid_count,
+                "Missing": missing_count,
+                "Sum": s.sum(),
+                "Min": s.min(),
+                "Max": s.max(),
+                "Mean": s.mean(),
             }
-            
-            # Convert the dictionary to a list of (title, result) tuples
+
             kpi_list = list(kpi_calculations.items())
 
-            # 2. Display Metrics in two rows for better spacing
-
-            # ROW 1:  (3 columns)
+            # ROW 1 (3 columns): Valid, Missing, Sum
             col1, col2, col3 = st.columns(3)
             cols_row1 = [col1, col2, col3]
-            
+
             for i in range(3):
                 title, result = kpi_list[i]
-                
-                # Formatting (using commas and 2 decimal places)
-                if isinstance(result, (float, int)):
-                    display_value = f"{result:,.2f}" 
+
+                if isinstance(result, (float)):
+                    display_value = f"{result:,.2f}"
                 else:
                     display_value = str(result)
-                
+
                 with cols_row1[i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
-            # ROW 2: Min, Max (2 columns)
+            # ROW 2 (3 columns): Min, Max, Mean
             col4, col5, col6 = st.columns(3)
             cols_row2 = [col4, col5, col6]
 
             for i in range(3):
-                # i starts at 0, so we access kpi_list items 3 and 4
-                title, result = kpi_list[i + 3] 
-                
-                # Formatting
+                title, result = kpi_list[i + 3]
+
                 if isinstance(result, (float, int)):
-                    # If numbers are huge, you might consider formatting them differently,
-                    # e.g., scientific notation or fewer decimals, but sticking to the current format
-                    display_value = f"{result:,.2f}" 
+                    display_value = f"{result:,.2f}"
                 else:
                     display_value = str(result)
-                
+
                 with cols_row2[i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+
+
+        # --- DATE KPIs ---
+        elif (
+            "datetime64" in str(kpi_dtype)
+            or str(kpi_dtype) == "datetime64[ns]"
+            or str(kpi_dtype) == "datetime64[ns, UTC]"
+            or kpi_dtype == "object"  # try-parse objects as dates
+        ):
+            # Try to coerce to datetime (safe for datetime cols too)
+            s = pd.to_datetime(df[kpi_column], errors="coerce")
+
+            valid = s.dropna()
+            missing_count = s.isna().sum()
+
+            if valid.empty:
+                st.warning(
+                    f"Column '{kpi_column}' looks like a date field, but no valid dates could be parsed."
+                )
+            else:
+                min_dt = valid.min()
+                max_dt = valid.max()
+                span_days = (max_dt - min_dt).days
+                unique_dates = valid.dt.date.nunique()
+
+                # Optional: most frequent date (mode)
+                mode_date = valid.dt.date.mode()
+                mode_date_value = mode_date.iloc[0] if not mode_date.empty else None
+
+                # KPI calculations (dates displayed nicely)
+                kpi_calculations = {
+                    "Count (valid)": int(valid.shape[0]),
+                    "Missing": int(missing_count),
+                    "Unique": int(unique_dates),
+                    "Min": min_dt.date(),
+                    "Max": max_dt.date(),
+                    "Span (days)": int(span_days),
+                }
+
+
+                # If you want a 7th metric (to fill 2 rows of 3 + 3 nicely, you already have 6)
+                # You can swap one in or display it below:
+                # kpi_calculations["Most common date"] = mode_date_value
+
+                kpi_list = list(kpi_calculations.items())
+
+                # ROW 1 (3 columns)
+                col1, col2, col3 = st.columns(3)
+                cols_row1 = [col1, col2, col3]
+
+                for i in range(3):
+                    title, result = kpi_list[i]
+                    display_value = str(result)
+                    with cols_row1[i]:
+                        st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+                # ROW 2 (3 columns)
+                col4, col5, col6 = st.columns(3)
+                cols_row2 = [col4, col5, col6]
+
+                for i in range(3):
+                    title, result = kpi_list[i + 3]
+                    display_value = str(result)
+                    with cols_row2[i]:
+                        st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+                # Optional extra info (mode)
+                if mode_date_value is not None:
+                    st.caption(f"Most common date: {mode_date_value}")
+
+        # --- CATEGORY KPIs ---
+        elif str(kpi_dtype) == "category":
+
+            s = df[kpi_column]
+
+            valid_count = int(s.notna().sum())
+            missing_count = int(s.isna().sum())
+            unique_count = int(s.nunique(dropna=True))
+
+            kpi_calculations = {
+                "Count (valid)": valid_count,
+                "Missing": missing_count,
+                "Unique": unique_count,
+            }
+
+            kpi_list = list(kpi_calculations.items())
+
+            # Single row (3 columns)
+            col1, col2, col3 = st.columns(3)
+            cols = [col1, col2, col3]
+
+            for i in range(3):
+                title, result = kpi_list[i]
+
+                # Counts should never be formatted
+                display_value = str(result)
+
+                with cols[i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
+
+
 
         else:
             st.warning(f"The column '{kpi_column}' is not numeric ({kpi_dtype}). Select a numeric field for KPIs.")

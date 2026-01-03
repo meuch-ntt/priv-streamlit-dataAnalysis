@@ -5,12 +5,12 @@ remove type category -> consider object instead
 Customizable part for kpis
 - Count non null, Count null
 
-kpis for type date, min max...
-
+// Functions
 first Show section KPI & Visuals when checked the type
 
-DONE
-number of rows in section data preview
+
+//DONE
+kpis Section finalized: DATE and Category added. Same structure/ Naming
 
 logos for each section
 

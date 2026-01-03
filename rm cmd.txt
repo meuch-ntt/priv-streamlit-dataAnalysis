@@ -25,6 +25,7 @@ python -m venv .venv
 .venv\Scripts\activate
 
 // Requirement file is there, install packages as described in requirements file
+// packages will be installed inside virtual environment inside project folder - not globally inside computer  
 pip install -r requirements.txt
 
 // SKIP, used to generate requirement file
