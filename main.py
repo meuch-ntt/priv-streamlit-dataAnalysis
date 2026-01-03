@@ -3,10 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
-import matplotlib.dates as mdates
 import plotting
-import openpyxl
 
 from pandas.api.types import (
     is_numeric_dtype,
@@ -85,11 +82,8 @@ if selected_file:
 
     st.write("")
 
-
-
 ##################################################################################
 # Data Preview (placeholder so it updates in-place)
-    st.markdown('<div id="data-preview"></div>', unsafe_allow_html=True)
     st.header("🔍 Data Preview")
 
     def highlight_first_row(s):
@@ -120,15 +114,9 @@ if selected_file:
     preview_placeholder.dataframe(render_preview(df))
 
 ##################################################################################
-# Changing the Type (no extra table here)
+# Changing the Type (safe converters only)  [BOOL REMOVED]
 
     st.header('🔧 Changing the Type')
-
-    if 'lastState' not in st.session_state:
-        st.session_state.lastState = None
-
-    if st.session_state.lastState is None:
-        st.warning("⚠️ In order to make changes: select the column(s) and desired type then confirm ")
 
     col1, col2, col3 = st.columns([3, 3, 1.5])
 
@@ -136,14 +124,14 @@ if selected_file:
         choose_cols = st.multiselect('Change the type of specific columns', options=columns)
 
     with col2:
-        possible_types = ['int64', 'float64', 'bool', 'datetime', 'date', 'category']
+        # ✅ removed bool
+        possible_types = ['int64', 'float64', 'datetime', 'date', 'category']
         choose_type = st.selectbox(
             'Set type to:',
             options=possible_types,
             index=None,
             placeholder="Choose an option"
         )
-
 
     with col3:
         st.markdown("<div style='margin-bottom: 6px; font-weight: bold;'>Confirm</div>", unsafe_allow_html=True)
@@ -152,22 +140,29 @@ if selected_file:
     if choose_cols and choose_type and change_type_clicked:
         try:
             for col in choose_cols:
+                s = st.session_state.df[col]
+
                 if choose_type == 'category':
-                    st.session_state.df[col] = st.session_state.df[col].astype('category')
-                    # category is a real dtype; no semantic override needed
+                    st.session_state.df[col] = s.astype('category')
                     st.session_state.col_semantic_types.pop(col, None)
 
                 elif choose_type == 'datetime':
-                    st.session_state.df[col] = pd.to_datetime(st.session_state.df[col], errors='coerce')
+                    st.session_state.df[col] = pd.to_datetime(s, errors='coerce')
                     st.session_state.col_semantic_types.pop(col, None)
 
                 elif choose_type == 'date':
-                    dt = pd.to_datetime(st.session_state.df[col], errors='coerce')
-                    st.session_state.df[col] = dt.dt.normalize()  # keep datetime dtype, but date semantics
+                    dt = pd.to_datetime(s, errors='coerce')
+                    st.session_state.df[col] = dt.dt.normalize()  # keep datetime dtype, date semantics
                     st.session_state.col_semantic_types[col] = "date"
 
-                else:
-                    st.session_state.df[col] = st.session_state.df[col].astype(choose_type)
+                elif choose_type == 'float64':
+                    st.session_state.df[col] = pd.to_numeric(s, errors="coerce")
+                    st.session_state.col_semantic_types.pop(col, None)
+
+                elif choose_type == 'int64':
+                    # safest: coerce first, then nullable integer
+                    num = pd.to_numeric(s, errors="coerce")
+                    st.session_state.df[col] = num.astype("Int64")
                     st.session_state.col_semantic_types.pop(col, None)
 
             df = st.session_state.df
@@ -176,12 +171,7 @@ if selected_file:
 
             # ✅ Update Data Preview in-place (no new table below)
             preview_placeholder.dataframe(render_preview(df))
-            st.session_state.lastState = True
 
-        except ValueError as e:
-            st.error(f"❌ Error changing type: {e}")
-        except TypeError as e:
-            st.error(f"❌ Error changing type: {e}")
         except Exception as e:
             st.error(f"❌ An unexpected error occurred: {e}")
 
@@ -222,19 +212,36 @@ if selected_file:
             col1, col2, col3 = st.columns(3)
             for i in range(3):
                 title, result = kpi_list[i]
-                display_value = f"{result:,.2f}" if isinstance(result, float) else str(result)
+
+                # ✅ no commas for counts
+                if title in ("Count (valid)", "Missing"):
+                    display_value = str(int(result))
+                elif isinstance(result, (float, int)):
+                    display_value = f"{result:,.2f}"
+                else:
+                    display_value = str(result)
+
                 with [col1, col2, col3][i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
             col4, col5, col6 = st.columns(3)
             for i in range(3):
                 title, result = kpi_list[i + 3]
-                display_value = f"{result:,.2f}" if isinstance(result, (float, int)) else str(result)
+
+                if title in ("Count (valid)", "Missing"):
+                    display_value = str(int(result))
+                elif isinstance(result, (float, int)):
+                    display_value = f"{result:,.2f}"
+                else:
+                    display_value = str(result)
+
                 with [col4, col5, col6][i]:
                     st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
         # DATE / DATETIME (semantic "date" OR real datetime dtype OR parseable object)
-        elif semantic == "date" or is_datetime64_any_dtype(s0) or is_object_dtype(s0):
+        elif semantic == "date" or is_datetime64_any_dtype(s0) or (
+            is_object_dtype(s0) and pd.to_datetime(s0, errors="coerce").notna().mean() > 0.6
+        ):
             s = pd.to_datetime(s0, errors="coerce")
             valid = s.dropna()
             missing_count = int(s.isna().sum())
@@ -247,7 +254,6 @@ if selected_file:
                 span_days = int((max_dt - min_dt).days)
                 unique_dates = int(valid.dt.date.nunique())
 
-                # If semantic date, show dates only, else show timestamps
                 min_disp = min_dt.date() if semantic == "date" else min_dt
                 max_disp = max_dt.date() if semantic == "date" else max_dt
 
@@ -274,13 +280,13 @@ if selected_file:
                     with [col4, col5, col6][i]:
                         st.metric(label=f"{title} of {kpi_column}", value=str(result))
 
-        # CATEGORY
+        # CATEGORY (only 3 measures)
         elif is_categorical_dtype(s0):
             s = s0
             kpi_calculations = {
                 "Count (valid)": int(s.notna().sum()),
                 "Missing": int(s.isna().sum()),
-                "Unique": int(s.nunique(dropna=True)),
+                "Unique categories": int(s.nunique(dropna=True)),
             }
 
             kpi_list = list(kpi_calculations.items())
@@ -348,7 +354,6 @@ if selected_file:
             sns.barplot(x=df[x_axis], y=df[y_axis], ax=ax)
 
         elif plot_type == 'Box Chart':
-            # sns.boxplot(x=df[x_axis], y=df[y_axis], ax=ax)
             pass
 
         elif plot_type == "Pie Chart":
