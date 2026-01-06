@@ -1,6 +1,3 @@
-NEXT STEP 1) col_semantic_types: really needed seperate - for date only??  
-can get rid of??
-
 NEXT STEP 2) 
 introduce Cach
 all in one big main
@@ -9,6 +6,7 @@ NEXT 3)
 check for tips, before going live -> chat gpt chat "Webapp Development Best Practices" first question
 before mergin all in one
 
+NEXT 4) Charts
 // FUNCTION Charts 
 naming colliding, too much text : product category vs unit solds as barchart 
 move all to plotting.py 
@@ -18,8 +16,11 @@ when choosing product category and product name -> third dimension appears. not 
 new dimension should appear if numerical!! 
 not only Count, also sum and average
 
+Line Chart
+-> ??? check for aggregation as well, sum/ avg??
 
-NEXT 4) ONLY AT END
+
+NEXT 5) ONLY AT END
 Refactoring: devide big main into smaller .py files 
 
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
@@ -28,11 +29,20 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
         remove category, all text category, except, more than 10 values?
 
 
+// Low Fruits
+Table preview starts with 0, should be 1
+
 // Functions
 first Show section KPI & Visuals when checked the type
 
 
 //DONE
+Push 01-06
+col_semantic_types
+Code Review Conner Ardman Part 1) Done: logical mistakes that could cause errors 
+2D Plots
+info/ Warning Messages
+
 PUSH 01-03-2026
 GOING LIVE ChatGPT1 
 

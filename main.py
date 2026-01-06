@@ -25,7 +25,18 @@ st.title('📈  Data Visualizer')
 working_dir = os.path.dirname(os.path.abspath(__file__))
 folder_path = f"{working_dir}/data"
 
+# Ensure the data folder exists
+if not os.path.isdir(folder_path):
+    st.error(f"Data folder not found: {folder_path}")
+    st.stop()
+
 files = [f for f in os.listdir(folder_path) if f.endswith(('.csv', '.xlsx'))]
+
+# No files found
+if not files:
+    st.warning("No .csv or .xlsx files found in the data folder.")
+    st.stop()
+
 selected_file = st.selectbox('Select a file', files, index=None)
 
 if selected_file:
@@ -51,9 +62,12 @@ if selected_file:
     if selected_file.endswith('.xlsx'):
         try:
             with pd.ExcelFile(file_path) as xls:
-                sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
+                sheet_name = st.selectbox('Select a sheet', xls.sheet_names, index=None)
 
-                if sheet_name:
+                if sheet_name is None:
+                    st.stop()
+
+                else:
                     is_new_dataset = (
                         st.session_state.df is None
                         or st.session_state.loaded_file != selected_file
@@ -64,8 +78,6 @@ if selected_file:
                         st.session_state.loaded_file = selected_file
                         st.session_state.loaded_sheet = sheet_name
                         _reset_column_semantics()
-                else:
-                    st.stop()
 
         except Exception as e:
             st.error("❌ Failed to read the Excel file. Please check the file and selected sheet.")
@@ -91,6 +103,9 @@ if selected_file:
             st.stop()
 
 
+    if st.session_state.df is None:
+        st.error("No data loaded. Please select a valid file/sheet.")
+        st.stop()
 
     df = st.session_state.df
     columns = df.columns.tolist()
@@ -132,20 +147,35 @@ if selected_file:
 # Changing the Type (safe converters only)  [BOOL REMOVED]
 
     st.header('🔧 Changing the Type')
+    st.info("Change the data type of columns if they were not interpreted correctly.")
+
+    # Show confirmation message if present
+    if "change_type_success_msg" in st.session_state:
+        st.success(st.session_state["change_type_success_msg"])
+
+    # Reset widget selections on the next run (before widgets are created)
+    if st.session_state.get("_reset_change_type_widgets", False):
+        st.session_state["change_type_cols"] = []
+        st.session_state["change_type_target"] = None
+        st.session_state["_reset_change_type_widgets"] = False
 
     col1, col2, col3 = st.columns([3, 3, 1.5])
 
     with col1:
-        choose_cols = st.multiselect('Change the type of specific columns', options=columns)
+        choose_cols = st.multiselect(
+            'Change the type of specific columns',
+            options=columns,
+            key="change_type_cols"
+        )
 
     with col2:
-        # ✅ removed bool
         possible_types = ['int64', 'float64', 'datetime', 'date', 'category']
         choose_type = st.selectbox(
             'Set type to:',
             options=possible_types,
             index=None,
-            placeholder="Choose an option"
+            placeholder="Choose an option",
+            key="change_type_target"
         )
 
     with col3:
@@ -167,7 +197,7 @@ if selected_file:
 
                 elif choose_type == 'date':
                     dt = pd.to_datetime(s, errors='coerce')
-                    st.session_state.df[col] = dt.dt.normalize()  # keep datetime dtype, date semantics
+                    st.session_state.df[col] = dt.dt.normalize()
                     st.session_state.column_semantics[col] = "date"
 
                 elif choose_type == 'float64':
@@ -175,41 +205,53 @@ if selected_file:
                     st.session_state.column_semantics.pop(col, None)
 
                 elif choose_type == 'int64':
-                    # safest: coerce first, then nullable integer
                     num = pd.to_numeric(s, errors="coerce")
                     st.session_state.df[col] = num.astype("Int64")
                     st.session_state.column_semantics.pop(col, None)
 
             df = st.session_state.df
 
-            st.success(f"✅ Column(s) '{', '.join(choose_cols)}' type successfully changed to '{choose_type}'.")
+            # Persist confirmation text across reruns
+            st.session_state["change_type_success_msg"] = (
+                f"✅ Column(s) '{', '.join(choose_cols)}' type successfully changed to '{choose_type}'. See data preview above"
+            )
 
-            # ✅ Update Data Preview in-place (no new table below)
             preview_placeholder.dataframe(render_preview(df))
+
+            # Trigger widget reset on next run
+            st.session_state["_reset_change_type_widgets"] = True
+            st.rerun()
 
         except Exception as e:
             st.error(f"❌ An unexpected error occurred: {e}")
+
+
 
 ##################################################################################
 # --- KPI SECTION ---
 
     st.header('🔢 Key Performance Indicators (KPIs)')
 
-    select_options = ["--- Select a Field ---"] + columns
-    kpi_column = st.selectbox('Select the field for KPI calculation',
-                              options=select_options,
-                              key='kpi_field_auto')
+    # info box
+    st.info("Select a data field below to view its key statistics.")
 
-    if kpi_column == "--- Select a Field ---":
-        st.info("Please select a data field above to view its key statistics.")
+    # Let the user choose a column; start with no preselected value
+    kpi_column = st.selectbox(
+        'Select the field for KPI calculation',
+        options=columns,
+        index=None,
+        key='kpi_field_auto'
+    )
 
-    elif kpi_column in columns:
+    # Only compute KPIs after a column is selected
+    if kpi_column is not None:
         s0 = df[kpi_column]
         semantic = st.session_state.column_semantics.get(kpi_column)
 
-        # NUMERIC
+        # Numeric KPIs
         if is_numeric_dtype(s0):
             s = s0
+
             valid_count = int(s.notna().sum())
             missing_count = int(s.isna().sum())
 
@@ -341,8 +383,14 @@ if selected_file:
     elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
         plot_list.extend(['Scatter Plot', 'Line Chart'])
 
-    elif x_sem == "date" or is_datetime64_any_dtype(x_s):
+    elif (x_sem == "date" or is_datetime64_any_dtype(x_s)) and is_numeric_dtype(y_s):
         plot_list.append('Line Chart')
+
+    # fallback: no compatible plots
+    if not plot_list:
+        st.warning("No compatible plots for the selected columns.")
+        st.stop()
+
 
     plot_type = st.selectbox('Select the type of plot', options=plot_list)
 
@@ -351,12 +399,20 @@ if selected_file:
 
         if plot_type == 'Bar Chart':
 
+            # safety check
+            if agg_func is None:
+                st.error("Please choose an aggregation function before generating the bar chart.")
+                st.stop()
+
             if agg_func == "sum":
                 bar_df = df.groupby(x_axis)[y_axis].sum().reset_index(name="sum")
                 value_col_name = "sum"
             elif agg_func == "average":
                 bar_df = df.groupby(x_axis)[y_axis].mean().reset_index(name="average")
                 value_col_name = "average"
+            else:
+                st.error(f"Unsupported aggregation: {agg_func}")
+                st.stop()
 
             bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
 
@@ -398,6 +454,11 @@ if selected_file:
                    colors=sns.color_palette("pastel"))
 
         elif plot_type == 'Line Chart':
+            #Guard
+            if not is_numeric_dtype(df[y_axis]):
+                st.error("Line Chart requires a numeric Y-axis.")
+                st.stop()
+            # handle depending on x-axis type       
             if st.session_state.column_semantics.get(x_axis) == "date" or is_datetime64_any_dtype(df[x_axis]):
                 plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
             else:
