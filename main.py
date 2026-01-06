@@ -40,42 +40,57 @@ if selected_file:
         st.session_state.loaded_sheet = None
 
     # ✅ metadata ONLY for semantic overrides like "date"
-    if "col_semantic_types" not in st.session_state:
-        st.session_state.col_semantic_types = {}
+    if "column_semantics" not in st.session_state:
+        st.session_state.column_semantics = {}
 
-    def _reset_semantic_types():
+    def _reset_column_semantics():
         # reset on new dataset to avoid carrying settings to unrelated files
-        st.session_state.col_semantic_types = {}
+        st.session_state.column_semantics = {}
 
+    #  Loading Excel using Context Manager: close file at end of the run/ no zombie file handles
     if selected_file.endswith('.xlsx'):
-        xls = pd.ExcelFile(file_path)
-        sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
+        try:
+            with pd.ExcelFile(file_path) as xls:
+                sheet_name = st.selectbox('Select a sheet', xls.sheet_names)
 
-        if sheet_name:
-            is_new_dataset = (
-                st.session_state.df is None
-                or st.session_state.loaded_file != selected_file
-                or st.session_state.loaded_sheet != sheet_name
-            )
-            if is_new_dataset:
-                st.session_state.df = pd.read_excel(xls, sheet_name=sheet_name)
-                st.session_state.loaded_file = selected_file
-                st.session_state.loaded_sheet = sheet_name
-                _reset_semantic_types()
-        else:
+                if sheet_name:
+                    is_new_dataset = (
+                        st.session_state.df is None
+                        or st.session_state.loaded_file != selected_file
+                        or st.session_state.loaded_sheet != sheet_name
+                    )
+                    if is_new_dataset:
+                        st.session_state.df = pd.read_excel(xls, sheet_name=sheet_name)
+                        st.session_state.loaded_file = selected_file
+                        st.session_state.loaded_sheet = sheet_name
+                        _reset_column_semantics()
+                else:
+                    st.stop()
+
+        except Exception as e:
+            st.error("❌ Failed to read the Excel file. Please check the file and selected sheet.")
+            st.exception(e)
             st.stop()
 
     else:
-        is_new_dataset = (
-            st.session_state.df is None
-            or st.session_state.loaded_file != selected_file
-            or st.session_state.loaded_sheet is not None
-        )
-        if is_new_dataset:
-            st.session_state.df = pd.read_csv(file_path)
-            st.session_state.loaded_file = selected_file
-            st.session_state.loaded_sheet = None
-            _reset_semantic_types()
+        try:
+            is_new_dataset = (
+                st.session_state.df is None
+                or st.session_state.loaded_file != selected_file
+                or st.session_state.loaded_sheet is not None
+            )
+            if is_new_dataset:
+                st.session_state.df = pd.read_csv(file_path)
+                st.session_state.loaded_file = selected_file
+                st.session_state.loaded_sheet = None
+                _reset_column_semantics()
+
+        except Exception as e:
+            st.error("❌ Failed to read the CSV file. Please ensure it is a valid CSV.")
+            st.exception(e)
+            st.stop()
+
+
 
     df = st.session_state.df
     columns = df.columns.tolist()
@@ -94,14 +109,14 @@ if selected_file:
 
         # ✅ display formatting: show date-only without "00:00:00"
         for c in head_df_local.columns:
-            if st.session_state.col_semantic_types.get(c) == "date":
+            if st.session_state.column_semantics.get(c) == "date":
                 s = pd.to_datetime(head_df_local[c], errors="coerce")
                 head_df_local[c] = s.dt.strftime("%Y-%m-%d")
 
         # Type row: pandas dtype except if semantic "date"
         display_types = []
         for c in head_df_local.columns:
-            if st.session_state.col_semantic_types.get(c) == "date":
+            if st.session_state.column_semantics.get(c) == "date":
                 display_types.append("date")
             else:
                 display_types.append(str(current_df[c].dtype))
@@ -144,26 +159,26 @@ if selected_file:
 
                 if choose_type == 'category':
                     st.session_state.df[col] = s.astype('category')
-                    st.session_state.col_semantic_types.pop(col, None)
+                    st.session_state.column_semantics.pop(col, None)
 
                 elif choose_type == 'datetime':
                     st.session_state.df[col] = pd.to_datetime(s, errors='coerce')
-                    st.session_state.col_semantic_types.pop(col, None)
+                    st.session_state.column_semantics.pop(col, None)
 
                 elif choose_type == 'date':
                     dt = pd.to_datetime(s, errors='coerce')
                     st.session_state.df[col] = dt.dt.normalize()  # keep datetime dtype, date semantics
-                    st.session_state.col_semantic_types[col] = "date"
+                    st.session_state.column_semantics[col] = "date"
 
                 elif choose_type == 'float64':
                     st.session_state.df[col] = pd.to_numeric(s, errors="coerce")
-                    st.session_state.col_semantic_types.pop(col, None)
+                    st.session_state.column_semantics.pop(col, None)
 
                 elif choose_type == 'int64':
                     # safest: coerce first, then nullable integer
                     num = pd.to_numeric(s, errors="coerce")
                     st.session_state.df[col] = num.astype("Int64")
-                    st.session_state.col_semantic_types.pop(col, None)
+                    st.session_state.column_semantics.pop(col, None)
 
             df = st.session_state.df
 
@@ -190,7 +205,7 @@ if selected_file:
 
     elif kpi_column in columns:
         s0 = df[kpi_column]
-        semantic = st.session_state.col_semantic_types.get(kpi_column)
+        semantic = st.session_state.column_semantics.get(kpi_column)
 
         # NUMERIC
         if is_numeric_dtype(s0):
@@ -304,57 +319,78 @@ if selected_file:
 
     st.header('📊 Charts & Visuals')
 
-    x_axis = st.selectbox('Select the X-axis', options=columns + ["None"])
-    y_axis = st.selectbox('Select the Y-axis', options=columns + ["None"])
+    x_axis = st.selectbox('Select the X-axis', options=columns)
+    y_axis = st.selectbox('Select the Y-axis', options=columns)
 
-    aggregation_functions = ["sum", "average", "count"]
-    z_axis = "None"
+    aggregation_functions = ["sum", "average"]
+    agg_func = None           # operation to apply
+    value_col_name = None     # name of aggregated result column
     plot_list = []
 
-    if x_axis != "None" and y_axis != "None":
-        x_s = df[x_axis]
-        y_s = df[y_axis]
+    x_s = df[x_axis]
+    y_s = df[y_axis]
 
-        x_sem = st.session_state.col_semantic_types.get(x_axis)
+    x_sem = st.session_state.column_semantics.get(x_axis)
 
-        if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
-            plot_list.extend(['Bar Chart', 'Pie Chart', 'Box Chart'])
+    if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
+        agg_func = st.selectbox('Select the aggregation function', options=aggregation_functions)
+        plot_list.append('Bar Chart')
+        if agg_func == "sum":
+            plot_list.append('Pie Chart')
 
-        elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
-            plot_list.extend(['Scatter Plot', 'Line Chart'])
+    elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
+        plot_list.extend(['Scatter Plot', 'Line Chart'])
 
-        elif x_sem == "date" or is_datetime64_any_dtype(x_s):
-            plot_list.append('Line Chart')
-
-        elif is_categorical_dtype(x_s) and is_object_dtype(y_s):
-            z_axis = st.selectbox('Select the aggregation funtion', options=aggregation_functions + ["None"])
-            plot_list.append('Bar Chart')
-
-    if x_axis == "None" or y_axis == "None":
-        plot_list = ['Line Chart', 'Scatter Plot', 'Distribution Plot', 'Count Plot']
+    elif x_sem == "date" or is_datetime64_any_dtype(x_s):
+        plot_list.append('Line Chart')
 
     plot_type = st.selectbox('Select the type of plot', options=plot_list)
 
     if st.button('Generate Plot'):
         fig, ax = plt.subplots(figsize=(6, 4))
 
-        if plot_type == 'Bar Chart' and z_axis == "count":
-            count_df = df.groupby(x_axis).size().reset_index(name='count')
-            count_df = count_df.sort_values(by='count', ascending=False)
-            sns.barplot(x=count_df[x_axis], y=count_df['count'], ax=ax)
+        if plot_type == 'Bar Chart':
+
+            if agg_func == "sum":
+                bar_df = df.groupby(x_axis)[y_axis].sum().reset_index(name="sum")
+                value_col_name = "sum"
+            elif agg_func == "average":
+                bar_df = df.groupby(x_axis)[y_axis].mean().reset_index(name="average")
+                value_col_name = "average"
+
+            bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
+
+            sns.barplot(x=bar_df[x_axis], y=bar_df[value_col_name], ax=ax)
             ax.tick_params(axis='x', rotation=90)
 
+            # desgin/ layout: leave space above bars for labels
+            ymax = bar_df[value_col_name].max()
+            if pd.notna(ymax) and ymax != 0:
+                ax.set_ylim(top=ymax * 1.10)
+    
             for p in ax.patches:
-                ax.annotate(f'{int(p.get_height())}',
-                            (p.get_x() + p.get_width() / 2., p.get_height()),
-                            ha='center', va='center', fontsize=12, color='black',
-                            xytext=(0, 5), textcoords='offset points')
+                height = p.get_height()
+                if pd.isna(height):
+                    continue
 
-        elif plot_type == 'Bar Chart' and z_axis != "count":
-            sns.barplot(x=df[x_axis], y=df[y_axis], ax=ax)
+                if agg_func == "average":
+                    label = f"{height:.2f}"
+                else:  # sum
+                    if float(height).is_integer():
+                        label = f"{int(height)}"
+                    else:
+                        label = f"{height:.2f}"
 
-        elif plot_type == 'Box Chart':
-            pass
+                ax.annotate(
+                    label,
+                    (p.get_x() + p.get_width() / 2., height),
+                    ha='center',
+                    va='bottom',
+                    fontsize=10,
+                    color='black',
+                    xytext=(0, 3),
+                    textcoords='offset points'
+                )
 
         elif plot_type == "Pie Chart":
             pie_data = df.groupby(x_axis)[y_axis].sum()
@@ -362,21 +398,13 @@ if selected_file:
                    colors=sns.color_palette("pastel"))
 
         elif plot_type == 'Line Chart':
-            if st.session_state.col_semantic_types.get(x_axis) == "date" or is_datetime64_any_dtype(df[x_axis]):
+            if st.session_state.column_semantics.get(x_axis) == "date" or is_datetime64_any_dtype(df[x_axis]):
                 plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
             else:
                 sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
 
         elif plot_type == 'Scatter Plot':
             sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
-
-        elif plot_type == 'Distribution Plot':
-            sns.histplot(df[x_axis], kde=True, ax=ax)
-            y_axis = 'Density'
-
-        elif plot_type == 'Count Plot':
-            sns.countplot(x=df[x_axis], ax=ax)
-            y_axis = 'Count'
 
         ax.tick_params(axis='x', labelsize=10)
         ax.tick_params(axis='y', labelsize=10)

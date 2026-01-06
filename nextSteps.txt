@@ -1,5 +1,17 @@
+NEXT STEP 1) col_semantic_types: really needed seperate - for date only??  
+can get rid of??
+
+NEXT STEP 2) 
+introduce Cach
+all in one big main
+
+NEXT 3) 
+check for tips, before going live -> chat gpt chat "Webapp Development Best Practices" first question
+before mergin all in one
+
 // FUNCTION Charts 
 naming colliding, too much text : product category vs unit solds as barchart 
+move all to plotting.py 
 
 // FUNCTION Chart LOGIC
 when choosing product category and product name -> third dimension appears. not correct.
@@ -7,9 +19,13 @@ new dimension should appear if numerical!!
 not only Count, also sum and average
 
 
+NEXT 4) ONLY AT END
+Refactoring: devide big main into smaller .py files 
+
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
     -doesnt distinguish between numerical/ float/ in, for him all numericals 
     - remove type category -> consider object instead 
+        remove category, all text category, except, more than 10 values?
 
 
 // Functions
