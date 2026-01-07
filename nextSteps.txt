@@ -2,9 +2,6 @@ NEXT STEP 2)
 introduce Cach
 all in one big main
 
-NEXT 3) 
-check for tips, before going live -> chat gpt chat "Webapp Development Best Practices" first question
-before mergin all in one
 
 NEXT 4) Charts
 // FUNCTION Charts 
@@ -28,6 +25,12 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
 
+// useability 
+show sections one by one 
+info text, data preview: next sections: possibilty change data type and make visuals 
+
+//Usabiility
+introduce logic for changing datatype, zb. float -> integer, makes no sense
 
 // Low Fruits
 Table preview starts with 0, should be 1
