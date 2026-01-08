@@ -1,8 +1,3 @@
-NEXT STEP 2) 
-introduce Cach
-all in one big main
-
-
 NEXT 4) Charts
 // FUNCTION Charts 
 naming colliding, too much text : product category vs unit solds as barchart 
