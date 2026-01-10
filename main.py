@@ -168,8 +168,8 @@ def load_derived_df_cached(
 # App setup
 # ==============================================================================
 
-st.set_page_config(page_title="Data Visualizer", layout="centered", page_icon="📊")
-st.title("📈  Data Visualizer")
+st.set_page_config(page_title="IDAA", layout="centered", page_icon="📊")
+st.title("📈  Inelligent Data Analyser APP")
 
 # ==============================================================================
 # Selecting the file
@@ -188,10 +188,11 @@ if not files:
     st.warning(MSG_NO_FILES_FOUND)
     st.stop()
 
+st.info("First, select the file with the data you want to analyze.")
+
 selected_file = st.selectbox("Select a file", files, index=None)
 
 if not selected_file:
-    st.info("Please select a file to continue.")
     st.stop()
 
 file_path = os.path.join(folder_path, selected_file)
@@ -282,8 +283,9 @@ st.write("")
 # Data Preview
 # ==============================================================================
 
-st.header("🔍 Data Preview")
+st.header("📄 Data Preview")
 
+st.info("This is a preview of the data with the first rows and current type interpretations of the columns.")
 
 def _preview_type_for_column(current_df: pd.DataFrame, col: str) -> str:
     if column_semantics.get(col) == SEM_DATE:
@@ -319,9 +321,7 @@ st.dataframe(render_preview(df))
 # ==============================================================================
 # Changing the Type (update overrides; cached derived df updates on rerun)
 # ==============================================================================
-import time 
-
-st.header("🔧 Changing the Type")
+st.subheader("🔧 Changing the Type")
 st.info("Change the data type of columns if they were not interpreted correctly.")
 
 if st.session_state.get("_reset_change_type_widgets", False):
@@ -362,262 +362,292 @@ if choose_cols and target_type and change_type_clicked:
                 column_semantics.pop(col, None)
 
         st.session_state["change_type_success_msg"] = (
-            f'✅ Column(s) "{", ".join(choose_cols)}" type changed successfully. See data preview above.'
+            f'✅ Column(s) "{", ".join(choose_cols)}" type changed successfully. See data preview above.)'
         )
+        st.session_state["change_type_success"] = True
         st.session_state["_reset_change_type_widgets"] = True
         st.rerun()
 
     except Exception as e:
         st.error(f"❌ An unexpected error occurred: {e}")
 
-if "change_type_success_until" in st.session_state:
+if st.session_state.get("change_type_success"):
     st.success(
             st.session_state['change_type_success_msg']
         )
-    
+
+# ==============================================================================
+# Data Analysis Selection
+# ==============================================================================
+
+st.header("🔍 Data Analysis")
+
+section = st.selectbox(
+    "Choose the type of analysis you want to perform",
+    options=["Key Performance Indicators (KPIs)", "Visualizations"],
+    index=None,
+    placeholder="Select what you want to do next",
+)
+
+if section is None:
+    st.stop()
+
 # ==============================================================================
 # KPI SECTION
 # ==============================================================================
 
-st.header("🔢 Key Performance Indicators (KPIs)")
-st.info("Select a data field below to view its key statistics.")
+if section == "Key Performance Indicators (KPIs)":
+    st.subheader("🔢 Key Performance Indicators (KPIs)")
+    st.info("Select a data field below to view its key statistics.")
 
-kpi_column = st.selectbox(
-    "Select the field for KPI calculation",
-    options=columns,
-    index=None,
-    key="kpi_field_auto",
-)
+    kpi_column = st.selectbox(
+        "Select the field for KPI calculation",
+        options=columns,
+        index=None,
+        key="kpi_field_auto",
+    )
 
-if kpi_column is not None:
-    s0 = df[kpi_column]
-    semantic = column_semantics.get(kpi_column)
+    if kpi_column is not None:
+        # Show the selected field clearly before rendering any KPIs
+        st.caption(f"Summary statistics for Field [{kpi_column}]")
 
-    # NUMERIC
-    if is_numeric_dtype(s0):
-        s = s0
-        valid_count = int(s.notna().sum())
-        missing_count = int(s.isna().sum())
+        s0 = df[kpi_column]
+        semantic = column_semantics.get(kpi_column)
 
-        kpi_calculations = {
-            "Count (valid)": valid_count,
-            "Missing": missing_count,
-            "Sum": s.sum(),
-            "Min": s.min(),
-            "Max": s.max(),
-            "Mean": s.mean(),
-        }
+        # NUMERIC
+        if is_numeric_dtype(s0):
+            s = s0
+            valid_count = int(s.notna().sum())
+            missing_count = int(s.isna().sum())
 
-        kpi_list = list(kpi_calculations.items())
+            kpi_calculations = {
+                "Count (valid)": valid_count,
+                "Missing": missing_count,
+                "Sum": s.sum(),
+                "Min": s.min(),
+                "Max": s.max(),
+                "Mean": s.mean(),
+            }
 
-        c1, c2, c3 = st.columns(3)
-        for i in range(3):
-            title, result = kpi_list[i]
-            if title in ("Count (valid)", "Missing"):
-                display_value = str(int(result))
-            elif isinstance(result, (float, int)):
-                display_value = f"{result:,.2f}"
-            else:
-                display_value = str(result)
-            with [c1, c2, c3][i]:
-                st.metric(label=f"{title} of {kpi_column}", value=display_value)
+            kpi_list = list(kpi_calculations.items())
 
-        c4, c5, c6 = st.columns(3)
-        for i in range(3):
-            title, result = kpi_list[i + 3]
-            if title in ("Count (valid)", "Missing"):
-                display_value = str(int(result))
-            elif isinstance(result, (float, int)):
-                display_value = f"{result:,.2f}"
-            else:
-                display_value = str(result)
-            with [c4, c5, c6][i]:
-                st.metric(label=f"{title} of {kpi_column}", value=display_value)
+            c1, c2, c3 = st.columns(3)
+            for i in range(3):
+                title, result = kpi_list[i]
+                if title in ("Count (valid)", "Missing"):
+                    display_value = str(int(result))
+                elif isinstance(result, (float, int)):
+                    display_value = f"{result:,.2f}"
+                else:
+                    display_value = str(result)
+                with [c1, c2, c3][i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
-    # DATE / DATETIME
-    else:
-        dt = None
-        is_date_like = False
+            c4, c5, c6 = st.columns(3)
+            for i in range(3):
+                title, result = kpi_list[i + 3]
+                if title in ("Count (valid)", "Missing"):
+                    display_value = str(int(result))
+                elif isinstance(result, (float, int)):
+                    display_value = f"{result:,.2f}"
+                else:
+                    display_value = str(result)
+                with [c4, c5, c6][i]:
+                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
 
-        if semantic == SEM_DATE:
-            is_date_like = True
-            dt = pd.to_datetime(s0, errors="coerce")
+        # DATE / DATETIME
+        else:
+            dt = None
+            is_date_like = False
 
-        elif is_datetime64_any_dtype(s0):
-            is_date_like = True
-            dt = s0
+            if semantic == SEM_DATE:
+                is_date_like = True
+                dt = pd.to_datetime(s0, errors="coerce")
 
-        elif is_object_dtype(s0):
-            dt_candidate = pd.to_datetime(s0, errors="coerce")
-            is_date_like = dt_candidate.notna().mean() > 0.6
-            dt = dt_candidate if is_date_like else None
+            elif is_datetime64_any_dtype(s0):
+                is_date_like = True
+                dt = s0
 
-        if is_date_like and dt is not None:
-            valid = dt.dropna()
-            missing_count = int(dt.isna().sum())
+            elif is_object_dtype(s0):
+                dt_candidate = pd.to_datetime(s0, errors="coerce")
+                is_date_like = dt_candidate.notna().mean() > 0.6
+                dt = dt_candidate if is_date_like else None
 
-            if valid.empty:
-                st.warning(f"Column '{kpi_column}' looks like a date/datetime field, but no valid dates could be parsed.")
-            else:
-                min_dt = valid.min()
-                max_dt = valid.max()
-                span_days = int((max_dt - min_dt).days)
-                unique_dates = int(valid.dt.date.nunique())
+            if is_date_like and dt is not None:
+                valid = dt.dropna()
+                missing_count = int(dt.isna().sum())
 
-                min_disp = min_dt.date() if semantic == SEM_DATE else min_dt
-                max_disp = max_dt.date() if semantic == SEM_DATE else max_dt
+                if valid.empty:
+                    st.warning(
+                        f"Column '{kpi_column}' looks like a date/datetime field, but no valid dates could be parsed."
+                    )
+                else:
+                    min_dt = valid.min()
+                    max_dt = valid.max()
+                    span_days = int((max_dt - min_dt).days)
+                    unique_dates = int(valid.dt.date.nunique())
 
+                    min_disp = min_dt.date() if semantic == SEM_DATE else min_dt
+                    max_disp = max_dt.date() if semantic == SEM_DATE else max_dt
+
+                    kpi_calculations = {
+                        "Count (valid)": int(valid.shape[0]),
+                        "Missing": missing_count,
+                        "Unique": unique_dates,
+                        "Min": min_disp,
+                        "Max": max_disp,
+                        "Span (days)": span_days,
+                    }
+
+                    kpi_list = list(kpi_calculations.items())
+
+                    c1, c2, c3 = st.columns(3)
+                    for i in range(3):
+                        title, result = kpi_list[i]
+                        with [c1, c2, c3][i]:
+                            st.metric(label=f"{title} of {kpi_column}", value=str(result))
+
+                    c4, c5, c6 = st.columns(3)
+                    for i in range(3):
+                        title, result = kpi_list[i + 3]
+                        with [c4, c5, c6][i]:
+                            st.metric(label=f"{title} of {kpi_column}", value=str(result))
+
+            elif is_categorical_dtype(s0):
+                s = s0
                 kpi_calculations = {
-                    "Count (valid)": int(valid.shape[0]),
-                    "Missing": missing_count,
-                    "Unique": unique_dates,
-                    "Min": min_disp,
-                    "Max": max_disp,
-                    "Span (days)": span_days,
+                    "Count (valid)": int(s.notna().sum()),
+                    "Missing": int(s.isna().sum()),
+                    "Unique categories": int(s.nunique(dropna=True)),
                 }
 
                 kpi_list = list(kpi_calculations.items())
 
                 c1, c2, c3 = st.columns(3)
-                for i in range(3):
+                for i in range(min(3, len(kpi_list))):
                     title, result = kpi_list[i]
                     with [c1, c2, c3][i]:
                         st.metric(label=f"{title} of {kpi_column}", value=str(result))
 
-                c4, c5, c6 = st.columns(3)
-                for i in range(3):
-                    title, result = kpi_list[i + 3]
-                    with [c4, c5, c6][i]:
-                        st.metric(label=f"{title} of {kpi_column}", value=str(result))
-
-        elif is_categorical_dtype(s0):
-            s = s0
-            kpi_calculations = {
-                "Count (valid)": int(s.notna().sum()),
-                "Missing": int(s.isna().sum()),
-                "Unique categories": int(s.nunique(dropna=True)),
-            }
-            kpi_list = list(kpi_calculations.items())
-            c1, c2, c3 = st.columns(3)
-            for i in range(3):
-                title, result = kpi_list[i]
-                with [c1, c2, c3][i]:
-                    st.metric(label=f"{title} of {kpi_column}", value=str(result))
-        else:
-            st.warning(f"The column '{kpi_column}' is not a supported type for KPIs (dtype={df[kpi_column].dtype}).")
-
-# ==============================================================================
-# Charts & Visuals
-# ==============================================================================
-
-st.header("📊 Charts & Visuals")
-
-x_axis = st.selectbox("Select the X-axis", options=columns)
-y_axis = st.selectbox("Select the Y-axis", options=columns)
-
-agg_func = None
-value_col_name = None
-plot_list: list[str] = []
-
-x_s = df[x_axis]
-y_s = df[y_axis]
-x_sem = column_semantics.get(x_axis)
-
-if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
-    agg_func = st.selectbox("Select the aggregation function", options=AGG_OPTIONS)
-    plot_list.append(PLOT_BAR)
-    if agg_func == AGG_SUM:
-        plot_list.append(PLOT_PIE)
-
-elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
-    plot_list.extend([PLOT_SCATTER, PLOT_LINE])
-
-elif (x_sem == SEM_DATE or is_datetime64_any_dtype(x_s)) and is_numeric_dtype(y_s):
-    plot_list.append(PLOT_LINE)
-
-if not plot_list:
-    st.warning("No compatible plots for the selected columns.")
-    st.stop()
-
-plot_type = st.selectbox("Select the type of plot", options=plot_list)
-
-if st.button("Generate Plot"):
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    if plot_type == PLOT_BAR:
-        if agg_func is None:
-            st.error("Please choose an aggregation function before generating the bar chart.")
-            st.stop()
-
-        if agg_func == AGG_SUM:
-            bar_df = df.groupby(x_axis)[y_axis].sum().reset_index(name=AGG_SUM)
-            value_col_name = AGG_SUM
-        elif agg_func == AGG_AVERAGE:
-            bar_df = df.groupby(x_axis)[y_axis].mean().reset_index(name=AGG_AVERAGE)
-            value_col_name = AGG_AVERAGE
-        else:
-            st.error(f"Unsupported aggregation: {agg_func}")
-            st.stop()
-
-        bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
-
-        sns.barplot(x=bar_df[x_axis], y=bar_df[value_col_name], ax=ax)
-        ax.tick_params(axis="x", rotation=90)
-
-        ymax = bar_df[value_col_name].max()
-        if pd.notna(ymax) and ymax != 0:
-            ax.set_ylim(top=ymax * 1.10)
-
-        for p in ax.patches:
-            height = p.get_height()
-            if pd.isna(height):
-                continue
-
-            if agg_func == AGG_AVERAGE:
-                label = f"{height:.2f}"
             else:
-                label = f"{int(height)}" if float(height).is_integer() else f"{height:.2f}"
+                st.warning(
+                    f"The column '{kpi_column}' is not a supported type for KPIs (dtype={df[kpi_column].dtype})."
+                )
 
-            ax.annotate(
-                label,
-                (p.get_x() + p.get_width() / 2.0, height),
-                ha="center",
-                va="bottom",
-                fontsize=10,
-                color="black",
-                xytext=(0, 3),
-                textcoords="offset points",
+
+# ==============================================================================
+# Visualizations
+# ==============================================================================
+
+elif section == "Visualizations":
+    st.subheader("📊 Visualizations")
+
+    x_axis = st.selectbox("Select the X-axis", options=columns)
+    y_axis = st.selectbox("Select the Y-axis", options=columns)
+
+    agg_func = None
+    value_col_name = None
+    plot_list: list[str] = []
+
+    x_s = df[x_axis]
+    y_s = df[y_axis]
+    x_sem = column_semantics.get(x_axis)
+
+    if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
+        agg_func = st.selectbox("Select the aggregation function", options=AGG_OPTIONS)
+        plot_list.append(PLOT_BAR)
+        if agg_func == AGG_SUM:
+            plot_list.append(PLOT_PIE)
+
+    elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
+        plot_list.extend([PLOT_SCATTER, PLOT_LINE])
+
+    elif (x_sem == SEM_DATE or is_datetime64_any_dtype(x_s)) and is_numeric_dtype(y_s):
+        plot_list.append(PLOT_LINE)
+
+    if not plot_list:
+        st.warning("No compatible plots for the selected columns.")
+        st.stop()
+
+    plot_type = st.selectbox("Select the type of plot", options=plot_list)
+
+    if st.button("Generate Plot"):
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        if plot_type == PLOT_BAR:
+            if agg_func is None:
+                st.error("Please choose an aggregation function before generating the bar chart.")
+                st.stop()
+
+            if agg_func == AGG_SUM:
+                bar_df = df.groupby(x_axis)[y_axis].sum().reset_index(name=AGG_SUM)
+                value_col_name = AGG_SUM
+            elif agg_func == AGG_AVERAGE:
+                bar_df = df.groupby(x_axis)[y_axis].mean().reset_index(name=AGG_AVERAGE)
+                value_col_name = AGG_AVERAGE
+            else:
+                st.error(f"Unsupported aggregation: {agg_func}")
+                st.stop()
+
+            bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
+
+            sns.barplot(x=bar_df[x_axis], y=bar_df[value_col_name], ax=ax)
+            ax.tick_params(axis="x", rotation=90)
+
+            ymax = bar_df[value_col_name].max()
+            if pd.notna(ymax) and ymax != 0:
+                ax.set_ylim(top=ymax * 1.10)
+
+            for p in ax.patches:
+                height = p.get_height()
+                if pd.isna(height):
+                    continue
+
+                if agg_func == AGG_AVERAGE:
+                    label = f"{height:.2f}"
+                else:
+                    label = f"{int(height)}" if float(height).is_integer() else f"{height:.2f}"
+
+                ax.annotate(
+                    label,
+                    (p.get_x() + p.get_width() / 2.0, height),
+                    ha="center",
+                    va="bottom",
+                    fontsize=10,
+                    color="black",
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                )
+
+        elif plot_type == PLOT_PIE:
+            pie_data = df.groupby(x_axis)[y_axis].sum()
+            ax.pie(
+                pie_data,
+                labels=pie_data.index,
+                autopct="%1.1f%%",
+                startangle=90,
+                colors=sns.color_palette("pastel"),
             )
 
-    elif plot_type == PLOT_PIE:
-        pie_data = df.groupby(x_axis)[y_axis].sum()
-        ax.pie(
-            pie_data,
-            labels=pie_data.index,
-            autopct="%1.1f%%",
-            startangle=90,
-            colors=sns.color_palette("pastel"),
-        )
+        elif plot_type == PLOT_LINE:
+            if not is_numeric_dtype(df[y_axis]):
+                st.error("Line Chart requires a numeric Y-axis.")
+                st.stop()
 
-    elif plot_type == PLOT_LINE:
-        if not is_numeric_dtype(df[y_axis]):
-            st.error("Line Chart requires a numeric Y-axis.")
-            st.stop()
+            if column_semantics.get(x_axis) == SEM_DATE or is_datetime64_any_dtype(df[x_axis]):
+                plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
+            else:
+                sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
 
-        if column_semantics.get(x_axis) == SEM_DATE or is_datetime64_any_dtype(df[x_axis]):
-            plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
-        else:
-            sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
+        elif plot_type == PLOT_SCATTER:
+            sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
 
-    elif plot_type == PLOT_SCATTER:
-        sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
+        ax.tick_params(axis="x", labelsize=10)
+        ax.tick_params(axis="y", labelsize=10)
 
-    ax.tick_params(axis="x", labelsize=10)
-    ax.tick_params(axis="y", labelsize=10)
+        plt.title(f"{plot_type} of {y_axis} vs {x_axis}", fontsize=12)
+        plt.xlabel(x_axis, fontsize=10)
+        plt.ylabel(y_axis, fontsize=10)
 
-    plt.title(f"{plot_type} of {y_axis} vs {x_axis}", fontsize=12)
-    plt.xlabel(x_axis, fontsize=10)
-    plt.ylabel(y_axis, fontsize=10)
-
-    st.pyplot(fig)
-    plt.close(fig)
+        st.pyplot(fig)
+        plt.close(fig)

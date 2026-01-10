@@ -1,4 +1,14 @@
-NEXT 4) Charts
+//Cach analysis introduce button for that - export in new ppt 
+FIRST seperate chach in cach handler.py
+
+
+// useability 
+show sections one by one 
+info text, data preview: next sections: possibilty change data type and make visuals 
+
+first Show section KPI & Visuals when checked the type
+
+// CHARTS
 // FUNCTION Charts 
 naming colliding, too much text : product category vs unit solds as barchart 
 move all to plotting.py 
@@ -12,7 +22,11 @@ Line Chart
 -> ??? check for aggregation as well, sum/ avg??
 
 
-NEXT 5) ONLY AT END
+// KPIS: LIVE2 KPIs Section: 2D
+- highest sales per Category 
+
+
+// ONLY AT END
 Refactoring: devide big main into smaller .py files 
 
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
@@ -20,9 +34,6 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
 
-// useability 
-show sections one by one 
-info text, data preview: next sections: possibilty change data type and make visuals 
 
 //Usabiility
 introduce logic for changing datatype, zb. float -> integer, makes no sense
@@ -30,8 +41,8 @@ introduce logic for changing datatype, zb. float -> integer, makes no sense
 // Low Fruits
 Table preview starts with 0, should be 1
 
-// Functions
-first Show section KPI & Visuals when checked the type
+
+
 
 
 //DONE
@@ -49,8 +60,29 @@ FUNCTION: kpis Section finalized: DATE and Category added. Same structure/ Namin
   when changing type -> change type in the table view
 
 
+
+// OTHERS
+
 logos for each section
 
+
+user not educated 
+    -doesnt distinguish between numerical/ float/ in, for him all numericals 
+    - remove type category -> consider object instead 
+
+Customizable part for kpis
+- Count non null, Count null
+
+// Functions
+first Show section KPI & Visuals when checked the type
+
+
+//DONE
+when changing type -> change type in the table view
+
+kpis Section finalized: DATE and Category added. Same structure/ Naming
+
+logos for each section
 
 
 
