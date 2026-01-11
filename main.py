@@ -42,7 +42,6 @@ AGG_OPTIONS = [AGG_SUM, AGG_AVERAGE]
 PLOT_BAR = "Bar Chart"
 PLOT_PIE = "Pie Chart"
 PLOT_LINE = "Line Chart"
-PLOT_SCATTER = "Scatter Plot"
 
 # Messages
 MSG_NO_DATA_LOADED = "No data loaded. Please select a valid file/sheet."
@@ -538,31 +537,47 @@ if section == "Key Performance Indicators (KPIs)":
 # ==============================================================================
 # Visualizations
 # ==============================================================================
-
 elif section == "Visualizations":
     st.subheader("📊 Visualizations")
 
+    # --------------------------------------------------------------------------
+    # Axis selection
+    # --------------------------------------------------------------------------
+
     x_axis = st.selectbox("Select the X-axis", options=columns)
-    y_axis = st.selectbox("Select the Y-axis", options=columns)
+
+    x_s = df[x_axis]
+    x_sem = column_semantics.get(x_axis)
 
     agg_func = None
     value_col_name = None
     plot_list: list[str] = []
 
-    x_s = df[x_axis]
+    # Treat as date-like if semantic date or datetime dtype
+    x_is_date_like = (x_sem == SEM_DATE) or is_datetime64_any_dtype(x_s)
+
+    # Y-axis + Aggregation on the same line when aggregation is relevant
+    if is_categorical_dtype(x_s) or x_is_date_like:
+        col_y, col_agg = st.columns([2, 1])
+        with col_y:
+            y_axis = st.selectbox("Select the Y-axis", options=columns)
+        with col_agg:
+            agg_func = st.selectbox("Aggregation", options=AGG_OPTIONS)
+    else:
+        y_axis = st.selectbox("Select the Y-axis", options=columns)
+
     y_s = df[y_axis]
-    x_sem = column_semantics.get(x_axis)
+
+    # --------------------------------------------------------------------------
+    # Plot compatibility
+    # --------------------------------------------------------------------------
 
     if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
-        agg_func = st.selectbox("Select the aggregation function", options=AGG_OPTIONS)
         plot_list.append(PLOT_BAR)
         if agg_func == AGG_SUM:
             plot_list.append(PLOT_PIE)
 
-    elif is_numeric_dtype(x_s) and is_numeric_dtype(y_s):
-        plot_list.extend([PLOT_SCATTER, PLOT_LINE])
-
-    elif (x_sem == SEM_DATE or is_datetime64_any_dtype(x_s)) and is_numeric_dtype(y_s):
+    elif x_is_date_like and is_numeric_dtype(y_s):
         plot_list.append(PLOT_LINE)
 
     if not plot_list:
@@ -571,9 +586,16 @@ elif section == "Visualizations":
 
     plot_type = st.selectbox("Select the type of plot", options=plot_list)
 
+    # --------------------------------------------------------------------------
+    # Plot rendering
+    # --------------------------------------------------------------------------
+
     if st.button("Generate Plot"):
         fig, ax = plt.subplots(figsize=(6, 4))
 
+        # -------------------------
+        # Bar chart
+        # -------------------------
         if plot_type == PLOT_BAR:
             if agg_func is None:
                 st.error("Please choose an aggregation function before generating the bar chart.")
@@ -592,7 +614,7 @@ elif section == "Visualizations":
             bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
 
             sns.barplot(x=bar_df[x_axis], y=bar_df[value_col_name], ax=ax)
-            ax.tick_params(axis="x", rotation=90)
+            ax.tick_params(axis="x", rotation=45)
 
             ymax = bar_df[value_col_name].max()
             if pd.notna(ymax) and ymax != 0:
@@ -619,6 +641,9 @@ elif section == "Visualizations":
                     textcoords="offset points",
                 )
 
+        # -------------------------
+        # Pie chart
+        # -------------------------
         elif plot_type == PLOT_PIE:
             pie_data = df.groupby(x_axis)[y_axis].sum()
             ax.pie(
@@ -628,26 +653,57 @@ elif section == "Visualizations":
                 startangle=90,
                 colors=sns.color_palette("pastel"),
             )
+            ax.axis("equal")
+            ax.set_xlabel("")
+            ax.set_ylabel("")
 
+        # -------------------------
+        # Line chart (date-based)
+        # -------------------------
         elif plot_type == PLOT_LINE:
             if not is_numeric_dtype(df[y_axis]):
                 st.error("Line Chart requires a numeric Y-axis.")
                 st.stop()
 
-            if column_semantics.get(x_axis) == SEM_DATE or is_datetime64_any_dtype(df[x_axis]):
-                plotting.create_lineChart_Date(df, x_axis, y_axis, ax)
-            else:
-                sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
+            if x_is_date_like:
+                if agg_func is None:
+                    st.error("Please choose an aggregation function (sum or average).")
+                    st.stop()
 
-        elif plot_type == PLOT_SCATTER:
-            sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
+                line_df = df[[x_axis, y_axis]].dropna().copy()
+                line_df[x_axis] = pd.to_datetime(line_df[x_axis], errors="coerce")
 
-        ax.tick_params(axis="x", labelsize=10)
+                if x_sem == SEM_DATE:
+                    line_df[x_axis] = line_df[x_axis].dt.normalize()
+
+                if agg_func == AGG_SUM:
+                    line_df = line_df.groupby(x_axis, as_index=False)[y_axis].sum()
+                elif agg_func == AGG_AVERAGE:
+                    line_df = line_df.groupby(x_axis, as_index=False)[y_axis].mean()
+                else:
+                    st.error(f"Unsupported aggregation: {agg_func}")
+                    st.stop()
+
+                line_df = line_df.sort_values(by=x_axis)
+
+                sns.lineplot(x=line_df[x_axis], y=line_df[y_axis], ax=ax)
+
+                # ✅ FIX: rotate date labels
+                ax.tick_params(axis="x", rotation=45)
+
+        # ----------------------------------------------------------------------
+        # Shared cosmetics
+        # ----------------------------------------------------------------------
+
         ax.tick_params(axis="y", labelsize=10)
+        plt.title(f"{plot_type} of {y_axis} by {x_axis}", fontsize=12)
 
-        plt.title(f"{plot_type} of {y_axis} vs {x_axis}", fontsize=12)
-        plt.xlabel(x_axis, fontsize=10)
-        plt.ylabel(y_axis, fontsize=10)
+        if plot_type != PLOT_PIE:
+            plt.xlabel(x_axis, fontsize=10)
+            plt.ylabel(y_axis, fontsize=10)
 
+        plt.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
+
+

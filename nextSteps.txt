@@ -6,24 +6,8 @@ FIRST seperate chach in cach handler.py
 show sections one by one 
 info text, data preview: next sections: possibilty change data type and make visuals 
 
-first Show section KPI & Visuals when checked the type
-
 // CHARTS
-// FUNCTION Charts 
-naming colliding, too much text : product category vs unit solds as barchart 
 move all to plotting.py 
-
-// FUNCTION Chart LOGIC
-when choosing product category and product name -> third dimension appears. not correct.
-new dimension should appear if numerical!! 
-not only Count, also sum and average
-
-Line Chart
--> ??? check for aggregation as well, sum/ avg??
-
-
-// KPIS: LIVE2 KPIs Section: 2D
-- highest sales per Category 
 
 
 // ONLY AT END
@@ -35,13 +19,12 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
         remove category, all text category, except, more than 10 values?
 
 
-//Usabiility
-introduce logic for changing datatype, zb. float -> integer, makes no sense
-
 // Low Fruits
 Table preview starts with 0, should be 1
 
 
+// KPIS: LIVE2 KPIs Section: 2D
+- highest sales per Category 
 
 
 
