@@ -1,16 +1,21 @@
+# main.py
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import streamlit as st
+
+import data_loader
 import plotting
+import kpis
 
 from pandas.api.types import (
     is_categorical_dtype,
     is_datetime64_any_dtype,
     is_numeric_dtype,
-    is_object_dtype,
 )
 
 # ==============================================================================
@@ -38,11 +43,6 @@ AGG_SUM = "sum"
 AGG_AVERAGE = "average"
 AGG_OPTIONS = [AGG_SUM, AGG_AVERAGE]
 
-# Plot names
-PLOT_BAR = "Bar Chart"
-PLOT_PIE = "Pie Chart"
-PLOT_LINE = "Line Chart"
-
 # Messages
 MSG_NO_DATA_LOADED = "No data loaded. Please select a valid file/sheet."
 MSG_NO_FILES_FOUND = "No .csv or .xlsx files found in the data folder."
@@ -50,43 +50,11 @@ MSG_FOLDER_NOT_FOUND_PREFIX = "Data folder not found:"
 
 
 # ==============================================================================
-# Caching helpers (file listing + file reads)
-# ==============================================================================
-
-@st.cache_data(show_spinner=False)
-def list_data_files(folder_path: str, exts: tuple[str, ...]) -> list[str]:
-    return sorted([f for f in os.listdir(folder_path) if f.endswith(exts)])
-
-
-@st.cache_data(show_spinner=False)
-def file_token(path: str) -> tuple[float, int]:
-    # Cache-buster token: changes when file content changes.
-    return (os.path.getmtime(path), os.path.getsize(path))
-
-
-@st.cache_data(show_spinner=True)
-def read_csv_cached(path: str, token: tuple[float, int]) -> pd.DataFrame:
-    # token exists only to invalidate cache when file changes
-    return pd.read_csv(path)
-
-
-@st.cache_data(show_spinner=False)
-def list_excel_sheets_cached(path: str, token: tuple[float, int]) -> list[str]:
-    with pd.ExcelFile(path) as xls:
-        return xls.sheet_names
-
-
-@st.cache_data(show_spinner=True)
-def read_excel_sheet_cached(path: str, sheet_name: str, token: tuple[float, int]) -> pd.DataFrame:
-    return pd.read_excel(path, sheet_name=sheet_name)
-
-
-# ==============================================================================
 # Derived df (apply overrides WITHOUT mutating raw_df)
 # ==============================================================================
 
 def _freeze_dict(d: dict[str, str]) -> tuple[tuple[str, str], ...]:
-    # Makes a dict hashable/stable for caching.
+    """Makes a dict hashable/stable for caching."""
     return tuple(sorted(d.items()))
 
 
@@ -127,7 +95,6 @@ def apply_type_overrides(
             if non_null.empty:
                 df2[col] = num
             else:
-                # Robust integer detection (avoid float precision issues from modulo)
                 all_integers = (non_null.round(0) == non_null).all()
                 df2[col] = num.astype("Int64") if all_integers else num
 
@@ -135,6 +102,15 @@ def apply_type_overrides(
             df2[col] = s.astype("string")
 
     return df2
+
+
+@st.cache_data(show_spinner=False)
+def to_datetime_cached(s: pd.Series) -> pd.Series:
+    """
+    Cached datetime parsing to avoid re-parsing the same column multiple times
+    (preview, KPI date detection, date line charts).
+    """
+    return pd.to_datetime(s, errors="coerce")
 
 
 @st.cache_data(show_spinner=True)
@@ -147,19 +123,12 @@ def load_derived_df_cached(
     frozen_column_semantics: tuple[tuple[str, str], ...],
 ) -> pd.DataFrame:
     """
-    Single cached entry point for: raw load + applying overrides.
+    Cached entry point for: raw load + applying overrides.
     Cache invalidates when file changes (token) OR overrides/semantics change.
     """
-    if ext == EXT_XLSX:
-        if sheet_name is None:
-            raise ValueError("sheet_name is required for Excel files.")
-        raw_df = read_excel_sheet_cached(path, sheet_name, token)
-    else:
-        raw_df = read_csv_cached(path, token)
-
+    raw_df = data_loader.load_raw_df_cached(path, ext, sheet_name, token)
     type_overrides = dict(frozen_type_overrides)
     column_semantics = dict(frozen_column_semantics)
-
     return apply_type_overrides(raw_df, type_overrides, column_semantics)
 
 
@@ -181,21 +150,20 @@ if not os.path.isdir(folder_path):
     st.error(f"{MSG_FOLDER_NOT_FOUND_PREFIX} {folder_path}")
     st.stop()
 
-files = list_data_files(folder_path, DATA_FILE_EXTS)
+files = data_loader.list_data_files(folder_path, DATA_FILE_EXTS)
 
 if not files:
     st.warning(MSG_NO_FILES_FOUND)
     st.stop()
 
-st.info("First, select the file with the data you want to analyze.")
-
 selected_file = st.selectbox("Select a file", files, index=None)
 
 if not selected_file:
+    st.info("First, select the file with the data you want to analyze.")
     st.stop()
 
 file_path = os.path.join(folder_path, selected_file)
-token = file_token(file_path)
+token = data_loader.file_token(file_path)
 ext = EXT_XLSX if selected_file.endswith(EXT_XLSX) else EXT_CSV
 
 # ---- Lightweight state only ----
@@ -206,11 +174,11 @@ if "loaded_sheet" not in st.session_state:
 
 # ---- Persist overrides PER dataset ----
 if "overrides_by_dataset" not in st.session_state:
-    # dataset_key -> {"type_overrides": {...}, "column_semantics": {...}}
     st.session_state.overrides_by_dataset = {}
 
 
 def get_dataset_state(dataset_key: tuple[str, str | None]):
+    """Per-dataset storage for type overrides and semantic overrides."""
     entry = st.session_state.overrides_by_dataset.get(dataset_key)
     if entry is None:
         entry = {"type_overrides": {}, "column_semantics": {}}
@@ -226,7 +194,7 @@ sheet_name: str | None = None
 
 if ext == EXT_XLSX:
     try:
-        sheet_names = list_excel_sheets_cached(file_path, token)
+        sheet_names = data_loader.list_excel_sheets_cached(file_path, token)
         if not sheet_names:
             st.error("No sheets found in this Excel file.")
             st.stop()
@@ -247,7 +215,6 @@ if ext == EXT_XLSX:
         st.error("❌ Failed to read the Excel file. Please check the file and selected sheet.")
         st.exception(e)
         st.stop()
-
 else:
     is_new_dataset = (
         st.session_state.loaded_file != selected_file
@@ -260,7 +227,6 @@ else:
 dataset_key = (selected_file, sheet_name)
 type_overrides, column_semantics = get_dataset_state(dataset_key)
 
-# Cached derived df (raw load + overrides)
 try:
     df = load_derived_df_cached(
         file_path,
@@ -283,8 +249,8 @@ st.write("")
 # ==============================================================================
 
 st.header("📄 Data Preview")
+st.write("This is a preview of the data with the first rows and current type interpretations of the columns.")
 
-st.info("This is a preview of the data with the first rows and current type interpretations of the columns.")
 
 def _preview_type_for_column(current_df: pd.DataFrame, col: str) -> str:
     if column_semantics.get(col) == SEM_DATE:
@@ -305,7 +271,7 @@ def render_preview(current_df: pd.DataFrame) -> pd.DataFrame:
 
     for c in head_df_local.columns:
         if column_semantics.get(c) == SEM_DATE:
-            s = pd.to_datetime(head_df_local[c], errors="coerce")
+            s = to_datetime_cached(head_df_local[c])
             head_df_local[c] = s.dt.strftime("%Y-%m-%d")
 
     display_types = [_preview_type_for_column(current_df, c) for c in head_df_local.columns]
@@ -318,10 +284,17 @@ def render_preview(current_df: pd.DataFrame) -> pd.DataFrame:
 st.dataframe(render_preview(df))
 
 # ==============================================================================
-# Changing the Type (update overrides; cached derived df updates on rerun)
+# Changing the Type
 # ==============================================================================
 st.subheader("🔧 Changing the Type")
-st.info("Change the data type of columns if they were not interpreted correctly.")
+
+# show info until user clicked "Change Type" at least once
+if "change_type_has_clicked" not in st.session_state:
+    st.session_state.change_type_has_clicked = False
+
+info_slot = st.empty()
+if not st.session_state.change_type_has_clicked:
+    info_slot.info("Change the data type of columns if they were not interpreted correctly.")
 
 if st.session_state.get("_reset_change_type_widgets", False):
     st.session_state["change_type_cols"] = []
@@ -351,6 +324,10 @@ with col3:
     change_type_clicked = st.button("Change Type")
 
 if choose_cols and target_type and change_type_clicked:
+    # user performed the action at least once -> hide info from now on
+    st.session_state.change_type_has_clicked = True
+    info_slot.empty()
+
     try:
         for col in choose_cols:
             if target_type == TARGET_DATE:
@@ -361,7 +338,7 @@ if choose_cols and target_type and change_type_clicked:
                 column_semantics.pop(col, None)
 
         st.session_state["change_type_success_msg"] = (
-            f'✅ Column(s) "{", ".join(choose_cols)}" type changed successfully. See data preview above.)'
+            f'✅ Column(s) "{", ".join(choose_cols)}" type changed successfully. See data preview above.'
         )
         st.session_state["change_type_success"] = True
         st.session_state["_reset_change_type_widgets"] = True
@@ -371,9 +348,8 @@ if choose_cols and target_type and change_type_clicked:
         st.error(f"❌ An unexpected error occurred: {e}")
 
 if st.session_state.get("change_type_success"):
-    st.success(
-            st.session_state['change_type_success_msg']
-        )
+    st.success(st.session_state["change_type_success_msg"])
+    st.session_state["change_type_success"] = False
 
 # ==============================================================================
 # Data Analysis Selection
@@ -381,183 +357,59 @@ if st.session_state.get("change_type_success"):
 
 st.header("🔍 Data Analysis")
 
+info_slot = st.empty()
+
 section = st.selectbox(
-    "Choose the type of analysis you want to perform",
+    "Analysis type",
     options=["Key Performance Indicators (KPIs)", "Visualizations"],
     index=None,
     placeholder="Select what you want to do next",
 )
 
 if section is None:
+    info_slot.info("Choose the type of analysis you want to perform")
     st.stop()
+else:
+    info_slot.empty()
 
 # ==============================================================================
-# KPI SECTION
+# KPI SECTION (moved to kpis.py)
 # ==============================================================================
 
 if section == "Key Performance Indicators (KPIs)":
-    st.subheader("🔢 Key Performance Indicators (KPIs)")
-    st.info("Select a data field below to view its key statistics.")
-
-    kpi_column = st.selectbox(
-        "Select the field for KPI calculation",
-        options=columns,
-        index=None,
-        key="kpi_field_auto",
+    kpis.render_kpi_section(
+        df,
+        columns=columns,
+        column_semantics=column_semantics,
+        sem_date_value=SEM_DATE,
+        to_datetime_fn=to_datetime_cached,
     )
 
-    if kpi_column is not None:
-        # Show the selected field clearly before rendering any KPIs
-        st.caption(f"Summary statistics for Field [{kpi_column}]")
-
-        s0 = df[kpi_column]
-        semantic = column_semantics.get(kpi_column)
-
-        # NUMERIC
-        if is_numeric_dtype(s0):
-            s = s0
-            valid_count = int(s.notna().sum())
-            missing_count = int(s.isna().sum())
-
-            kpi_calculations = {
-                "Count (valid)": valid_count,
-                "Missing": missing_count,
-                "Sum": s.sum(),
-                "Min": s.min(),
-                "Max": s.max(),
-                "Mean": s.mean(),
-            }
-
-            kpi_list = list(kpi_calculations.items())
-
-            c1, c2, c3 = st.columns(3)
-            for i in range(3):
-                title, result = kpi_list[i]
-                if title in ("Count (valid)", "Missing"):
-                    display_value = str(int(result))
-                elif isinstance(result, (float, int)):
-                    display_value = f"{result:,.2f}"
-                else:
-                    display_value = str(result)
-                with [c1, c2, c3][i]:
-                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
-
-            c4, c5, c6 = st.columns(3)
-            for i in range(3):
-                title, result = kpi_list[i + 3]
-                if title in ("Count (valid)", "Missing"):
-                    display_value = str(int(result))
-                elif isinstance(result, (float, int)):
-                    display_value = f"{result:,.2f}"
-                else:
-                    display_value = str(result)
-                with [c4, c5, c6][i]:
-                    st.metric(label=f"{title} of {kpi_column}", value=display_value)
-
-        # DATE / DATETIME
-        else:
-            dt = None
-            is_date_like = False
-
-            if semantic == SEM_DATE:
-                is_date_like = True
-                dt = pd.to_datetime(s0, errors="coerce")
-
-            elif is_datetime64_any_dtype(s0):
-                is_date_like = True
-                dt = s0
-
-            elif is_object_dtype(s0):
-                dt_candidate = pd.to_datetime(s0, errors="coerce")
-                is_date_like = dt_candidate.notna().mean() > 0.6
-                dt = dt_candidate if is_date_like else None
-
-            if is_date_like and dt is not None:
-                valid = dt.dropna()
-                missing_count = int(dt.isna().sum())
-
-                if valid.empty:
-                    st.warning(
-                        f"Column '{kpi_column}' looks like a date/datetime field, but no valid dates could be parsed."
-                    )
-                else:
-                    min_dt = valid.min()
-                    max_dt = valid.max()
-                    span_days = int((max_dt - min_dt).days)
-                    unique_dates = int(valid.dt.date.nunique())
-
-                    min_disp = min_dt.date() if semantic == SEM_DATE else min_dt
-                    max_disp = max_dt.date() if semantic == SEM_DATE else max_dt
-
-                    kpi_calculations = {
-                        "Count (valid)": int(valid.shape[0]),
-                        "Missing": missing_count,
-                        "Unique": unique_dates,
-                        "Min": min_disp,
-                        "Max": max_disp,
-                        "Span (days)": span_days,
-                    }
-
-                    kpi_list = list(kpi_calculations.items())
-
-                    c1, c2, c3 = st.columns(3)
-                    for i in range(3):
-                        title, result = kpi_list[i]
-                        with [c1, c2, c3][i]:
-                            st.metric(label=f"{title} of {kpi_column}", value=str(result))
-
-                    c4, c5, c6 = st.columns(3)
-                    for i in range(3):
-                        title, result = kpi_list[i + 3]
-                        with [c4, c5, c6][i]:
-                            st.metric(label=f"{title} of {kpi_column}", value=str(result))
-
-            elif is_categorical_dtype(s0):
-                s = s0
-                kpi_calculations = {
-                    "Count (valid)": int(s.notna().sum()),
-                    "Missing": int(s.isna().sum()),
-                    "Unique categories": int(s.nunique(dropna=True)),
-                }
-
-                kpi_list = list(kpi_calculations.items())
-
-                c1, c2, c3 = st.columns(3)
-                for i in range(min(3, len(kpi_list))):
-                    title, result = kpi_list[i]
-                    with [c1, c2, c3][i]:
-                        st.metric(label=f"{title} of {kpi_column}", value=str(result))
-
-            else:
-                st.warning(
-                    f"The column '{kpi_column}' is not a supported type for KPIs (dtype={df[kpi_column].dtype})."
-                )
-
-
 # ==============================================================================
-# Visualizations
+# Visualizations (still using plotting.py)
 # ==============================================================================
 elif section == "Visualizations":
     st.subheader("📊 Visualizations")
 
-    # --------------------------------------------------------------------------
-    # Axis selection
-    # --------------------------------------------------------------------------
+    # show info until user generated at least one plot
+    if "viz_has_generated" not in st.session_state:
+        st.session_state.viz_has_generated = False
+
+    info_slot = st.empty()
+    if not st.session_state.viz_has_generated:
+        info_slot.info("Select the fields and type of plot you want to generate.")
 
     x_axis = st.selectbox("Select the X-axis", options=columns)
-
     x_s = df[x_axis]
     x_sem = column_semantics.get(x_axis)
 
     agg_func = None
-    value_col_name = None
-    plot_list: list[str] = []
 
-    # Treat as date-like if semantic date or datetime dtype
     x_is_date_like = (x_sem == SEM_DATE) or is_datetime64_any_dtype(x_s)
+    x_is_cat = is_categorical_dtype(x_s)
 
-    # Y-axis + Aggregation on the same line when aggregation is relevant
-    if is_categorical_dtype(x_s) or x_is_date_like:
+    # show Y-axis + Aggregation on same line when relevant
+    if x_is_cat or x_is_date_like:
         col_y, col_agg = st.columns([2, 1])
         with col_y:
             y_axis = st.selectbox("Select the Y-axis", options=columns)
@@ -567,18 +419,15 @@ elif section == "Visualizations":
         y_axis = st.selectbox("Select the Y-axis", options=columns)
 
     y_s = df[y_axis]
+    y_is_numeric = is_numeric_dtype(y_s)
 
-    # --------------------------------------------------------------------------
-    # Plot compatibility
-    # --------------------------------------------------------------------------
-
-    if is_categorical_dtype(x_s) and is_numeric_dtype(y_s):
-        plot_list.append(PLOT_BAR)
-        if agg_func == AGG_SUM:
-            plot_list.append(PLOT_PIE)
-
-    elif x_is_date_like and is_numeric_dtype(y_s):
-        plot_list.append(PLOT_LINE)
+    plot_list = plotting.compatible_plots(
+        x_is_categorical=x_is_cat,
+        x_is_date_like=x_is_date_like,
+        y_is_numeric=y_is_numeric,
+        agg_func=agg_func,
+        agg_sum_value=AGG_SUM,
+    )
 
     if not plot_list:
         st.warning("No compatible plots for the selected columns.")
@@ -586,124 +435,68 @@ elif section == "Visualizations":
 
     plot_type = st.selectbox("Select the type of plot", options=plot_list)
 
-    # --------------------------------------------------------------------------
-    # Plot rendering
-    # --------------------------------------------------------------------------
+    generate_clicked = st.button("Generate Plot")
 
-    if st.button("Generate Plot"):
-        fig, ax = plt.subplots(figsize=(6, 4))
+    if generate_clicked:
+        # user has taken the action at least once -> hide info from now on
+        st.session_state.viz_has_generated = True
+        info_slot.empty()
 
-        # -------------------------
-        # Bar chart
-        # -------------------------
-        if plot_type == PLOT_BAR:
-            if agg_func is None:
-                st.error("Please choose an aggregation function before generating the bar chart.")
-                st.stop()
+        agg_part = f" ({agg_func})" if agg_func else ""
 
-            if agg_func == AGG_SUM:
-                bar_df = df.groupby(x_axis)[y_axis].sum().reset_index(name=AGG_SUM)
-                value_col_name = AGG_SUM
-            elif agg_func == AGG_AVERAGE:
-                bar_df = df.groupby(x_axis)[y_axis].mean().reset_index(name=AGG_AVERAGE)
-                value_col_name = AGG_AVERAGE
-            else:
-                st.error(f"Unsupported aggregation: {agg_func}")
-                st.stop()
+        # ✅ caption like in KPI section
+        st.caption(f"{plot_type} of{agg_part}  {y_axis} by {x_axis}")
 
-            bar_df = bar_df.sort_values(by=value_col_name, ascending=False)
+        try:
+            if plot_type == plotting.PLOT_BAR:
+                if agg_func is None:
+                    st.error("Please choose an aggregation function before generating the bar chart.")
+                    st.stop()
 
-            sns.barplot(x=bar_df[x_axis], y=bar_df[value_col_name], ax=ax)
-            ax.tick_params(axis="x", rotation=45)
-
-            ymax = bar_df[value_col_name].max()
-            if pd.notna(ymax) and ymax != 0:
-                ax.set_ylim(top=ymax * 1.10)
-
-            for p in ax.patches:
-                height = p.get_height()
-                if pd.isna(height):
-                    continue
-
-                if agg_func == AGG_AVERAGE:
-                    label = f"{height:.2f}"
-                else:
-                    label = f"{int(height)}" if float(height).is_integer() else f"{height:.2f}"
-
-                ax.annotate(
-                    label,
-                    (p.get_x() + p.get_width() / 2.0, height),
-                    ha="center",
-                    va="bottom",
-                    fontsize=10,
-                    color="black",
-                    xytext=(0, 3),
-                    textcoords="offset points",
+                fig = plotting.make_bar_chart(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    agg_func=agg_func,
+                    agg_sum_value=AGG_SUM,
+                    agg_avg_value=AGG_AVERAGE,
                 )
 
-        # -------------------------
-        # Pie chart
-        # -------------------------
-        elif plot_type == PLOT_PIE:
-            pie_data = df.groupby(x_axis)[y_axis].sum()
-            ax.pie(
-                pie_data,
-                labels=pie_data.index,
-                autopct="%1.1f%%",
-                startangle=90,
-                colors=sns.color_palette("pastel"),
-            )
-            ax.axis("equal")
-            ax.set_xlabel("")
-            ax.set_ylabel("")
+            elif plot_type == plotting.PLOT_PIE:
+                fig = plotting.make_pie_chart(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                )
 
-        # -------------------------
-        # Line chart (date-based)
-        # -------------------------
-        elif plot_type == PLOT_LINE:
-            if not is_numeric_dtype(df[y_axis]):
-                st.error("Line Chart requires a numeric Y-axis.")
-                st.stop()
-
-            if x_is_date_like:
+            elif plot_type == plotting.PLOT_LINE:
+                if not y_is_numeric:
+                    st.error("Line Chart requires a numeric Y-axis.")
+                    st.stop()
                 if agg_func is None:
                     st.error("Please choose an aggregation function (sum or average).")
                     st.stop()
 
-                line_df = df[[x_axis, y_axis]].dropna().copy()
-                line_df[x_axis] = pd.to_datetime(line_df[x_axis], errors="coerce")
+                fig = plotting.make_line_chart(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    agg_func=agg_func,
+                    x_semantic=x_sem,
+                    sem_date_value=SEM_DATE,
+                    agg_sum_value=AGG_SUM,
+                    agg_avg_value=AGG_AVERAGE,
+                    to_datetime_fn=to_datetime_cached,
+                )
+            else:
+                st.error(f"Unsupported plot type: {plot_type}")
+                st.stop()
 
-                if x_sem == SEM_DATE:
-                    line_df[x_axis] = line_df[x_axis].dt.normalize()
+            st.pyplot(fig)
+            plt.close(fig)
 
-                if agg_func == AGG_SUM:
-                    line_df = line_df.groupby(x_axis, as_index=False)[y_axis].sum()
-                elif agg_func == AGG_AVERAGE:
-                    line_df = line_df.groupby(x_axis, as_index=False)[y_axis].mean()
-                else:
-                    st.error(f"Unsupported aggregation: {agg_func}")
-                    st.stop()
-
-                line_df = line_df.sort_values(by=x_axis)
-
-                sns.lineplot(x=line_df[x_axis], y=line_df[y_axis], ax=ax)
-
-                # ✅ FIX: rotate date labels
-                ax.tick_params(axis="x", rotation=45)
-
-        # ----------------------------------------------------------------------
-        # Shared cosmetics
-        # ----------------------------------------------------------------------
-
-        ax.tick_params(axis="y", labelsize=10)
-        plt.title(f"{plot_type} of {y_axis} by {x_axis}", fontsize=12)
-
-        if plot_type != PLOT_PIE:
-            plt.xlabel(x_axis, fontsize=10)
-            plt.ylabel(y_axis, fontsize=10)
-
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+        except Exception as e:
+            st.error(f"❌ Failed to generate plot: {e}")
+            st.exception(e)
 
 
