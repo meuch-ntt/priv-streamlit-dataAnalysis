@@ -137,7 +137,7 @@ def load_derived_df_cached(
 # ==============================================================================
 
 st.set_page_config(page_title="IDAA", layout="centered", page_icon="📊")
-st.title("📈  Inelligent Data Analyser APP")
+st.title("📈  Intelligent Data Analyser APP")
 
 # ==============================================================================
 # Selecting the file
@@ -278,7 +278,12 @@ def render_preview(current_df: pd.DataFrame) -> pd.DataFrame:
     display_types = [f"[{t.upper()}]" for t in display_types]
     dtypes_row_local = pd.Series(display_types, index=head_df_local.columns, name="Type")
 
-    return pd.concat([pd.DataFrame(dtypes_row_local).T, head_df_local])
+    preview_df = pd.concat([pd.DataFrame(dtypes_row_local).T, head_df_local])
+
+    # keep "Type" row, enumerate data rows starting at 1
+    preview_df.index = ["Type"] + list(range(1, len(preview_df)))
+
+    return preview_df
 
 
 st.dataframe(render_preview(df))
@@ -388,115 +393,16 @@ if section == "Key Performance Indicators (KPIs)":
 # ==============================================================================
 # Visualizations (still using plotting.py)
 # ==============================================================================
+
 elif section == "Visualizations":
-    st.subheader("📊 Visualizations")
-
-    # show info until user generated at least one plot
-    if "viz_has_generated" not in st.session_state:
-        st.session_state.viz_has_generated = False
-
-    info_slot = st.empty()
-    if not st.session_state.viz_has_generated:
-        info_slot.info("Select the fields and type of plot you want to generate.")
-
-    x_axis = st.selectbox("Select the X-axis", options=columns)
-    x_s = df[x_axis]
-    x_sem = column_semantics.get(x_axis)
-
-    agg_func = None
-
-    x_is_date_like = (x_sem == SEM_DATE) or is_datetime64_any_dtype(x_s)
-    x_is_cat = is_categorical_dtype(x_s)
-
-    # show Y-axis + Aggregation on same line when relevant
-    if x_is_cat or x_is_date_like:
-        col_y, col_agg = st.columns([2, 1])
-        with col_y:
-            y_axis = st.selectbox("Select the Y-axis", options=columns)
-        with col_agg:
-            agg_func = st.selectbox("Aggregation", options=AGG_OPTIONS)
-    else:
-        y_axis = st.selectbox("Select the Y-axis", options=columns)
-
-    y_s = df[y_axis]
-    y_is_numeric = is_numeric_dtype(y_s)
-
-    plot_list = plotting.compatible_plots(
-        x_is_categorical=x_is_cat,
-        x_is_date_like=x_is_date_like,
-        y_is_numeric=y_is_numeric,
-        agg_func=agg_func,
+    plotting.render_visualizations_section(
+        df,
+        columns=columns,
+        column_semantics=column_semantics,
+        sem_date_value=SEM_DATE,
+        agg_options=AGG_OPTIONS,
         agg_sum_value=AGG_SUM,
+        agg_avg_value=AGG_AVERAGE,
+        to_datetime_fn=to_datetime_cached,
     )
-
-    if not plot_list:
-        st.warning("No compatible plots for the selected columns.")
-        st.stop()
-
-    plot_type = st.selectbox("Select the type of plot", options=plot_list)
-
-    generate_clicked = st.button("Generate Plot")
-
-    if generate_clicked:
-        # user has taken the action at least once -> hide info from now on
-        st.session_state.viz_has_generated = True
-        info_slot.empty()
-
-        agg_part = f" ({agg_func})" if agg_func else ""
-
-        # ✅ caption like in KPI section
-        st.caption(f"{plot_type} of{agg_part}  {y_axis} by {x_axis}")
-
-        try:
-            if plot_type == plotting.PLOT_BAR:
-                if agg_func is None:
-                    st.error("Please choose an aggregation function before generating the bar chart.")
-                    st.stop()
-
-                fig = plotting.make_bar_chart(
-                    df,
-                    x_axis=x_axis,
-                    y_axis=y_axis,
-                    agg_func=agg_func,
-                    agg_sum_value=AGG_SUM,
-                    agg_avg_value=AGG_AVERAGE,
-                )
-
-            elif plot_type == plotting.PLOT_PIE:
-                fig = plotting.make_pie_chart(
-                    df,
-                    x_axis=x_axis,
-                    y_axis=y_axis,
-                )
-
-            elif plot_type == plotting.PLOT_LINE:
-                if not y_is_numeric:
-                    st.error("Line Chart requires a numeric Y-axis.")
-                    st.stop()
-                if agg_func is None:
-                    st.error("Please choose an aggregation function (sum or average).")
-                    st.stop()
-
-                fig = plotting.make_line_chart(
-                    df,
-                    x_axis=x_axis,
-                    y_axis=y_axis,
-                    agg_func=agg_func,
-                    x_semantic=x_sem,
-                    sem_date_value=SEM_DATE,
-                    agg_sum_value=AGG_SUM,
-                    agg_avg_value=AGG_AVERAGE,
-                    to_datetime_fn=to_datetime_cached,
-                )
-            else:
-                st.error(f"Unsupported plot type: {plot_type}")
-                st.stop()
-
-            st.pyplot(fig)
-            plt.close(fig)
-
-        except Exception as e:
-            st.error(f"❌ Failed to generate plot: {e}")
-            st.exception(e)
-
 

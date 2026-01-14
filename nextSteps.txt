@@ -1,14 +1,10 @@
-//Cach analysis introduce button for that - export in new ppt 
-FIRST seperate chach in cach handler.py
+// more user friendly, away from x-axis
+What you want to analyse (y-axis, usually numerical value like sales)
+According to which dimention (x-axis, usually category/ date, for exaple sales by Region)
+X Axis: Category/ Date by wich you want to analyse data 
 
-
-// useability 
-show sections one by one 
-info text, data preview: next sections: possibilty change data type and make visuals 
-
-// CHARTS
-move all to plotting.py 
-
+-- better logic
+show only correct data type to choose among
 
 // ONLY AT END
 Refactoring: devide big main into smaller .py files 
@@ -18,15 +14,17 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
 
-
-// Low Fruits
-Table preview starts with 0, should be 1
-
-
 // KPIS: LIVE2 KPIs Section: 2D
 - highest sales per Category 
 
+// Paid version: save graph, export results in ppt
+// Premium: AGENT, read Data, agent does everything, user has no idea about data
 
+// DONE 01-15
+Section visualisation 
+refactoring away from main
+Style pie chart 
+not all at once, rather: field per field 
 
 //DONE
 Push 01-06
