@@ -118,22 +118,21 @@ def make_pie_chart(
     def autopct_fn(pct: float) -> str:
         return f"{pct:.1f}%" if pct >= 3 else ""
 
-    wedges, texts, autotexts = ax.pie(
+    wedges, _, _ = ax.pie(
         pie_data.values,
-        labels=None,                 # ✅ put labels in legend instead
-        autopct=autopct_fn,          # ✅ hide tiny percentages
+        labels=None,
+        autopct=autopct_fn,
         startangle=90,
         counterclock=False,
-        pctdistance=0.7,             # ✅ keep percentages inside
+        pctdistance=0.7,
         textprops={"fontsize": 10},
-        colors=sns.color_palette("pastel", n_colors=len(pie_data)),
+        colors=sns.color_palette("colorblind", n_colors=len(pie_data)),
         wedgeprops={"linewidth": 1, "edgecolor": "white"},
     )
 
     ax.axis("equal")
     ax.set_title(f"{PLOT_PIE} of {y_axis} by {x_axis}", fontsize=12)
 
-    # ✅ legend for category names (no collisions)
     ax.legend(
         wedges,
         pie_data.index.astype(str),
@@ -145,7 +144,6 @@ def make_pie_chart(
 
     fig.tight_layout()
     return fig
-
 
 
 def make_line_chart(
@@ -195,6 +193,20 @@ def make_line_chart(
     return fig
 
 
+def _numeric_columns(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if is_numeric_dtype(df[c])]
+
+
+def _category_or_date_columns(df: pd.DataFrame, column_semantics: dict[str, str], sem_date_value: str) -> list[str]:
+    cols: list[str] = []
+    for c in df.columns:
+        s = df[c]
+        is_date = (column_semantics.get(c) == sem_date_value) or is_datetime64_any_dtype(s)
+        if is_date or is_categorical_dtype(s):
+            cols.append(c)
+    return cols
+
+
 def render_visualizations_section(
     df: pd.DataFrame,
     *,
@@ -221,17 +233,60 @@ def render_visualizations_section(
 
     info_slot = st.empty()
     if not st.session_state.viz_has_generated:
-        info_slot.info("Select the fields and type of plot you want to generate.")
+        info_slot.info("Choose what to measure and how to break it down, then generate a chart.")
+
+    numeric_cols = _numeric_columns(df)
+    group_cols = _category_or_date_columns(df, column_semantics, sem_date_value)
+
+    if not numeric_cols:
+        st.warning("No numeric fields available to measure.")
+        st.stop()
+
+    if not group_cols:
+        st.warning("No category or date fields available to break down by.")
+        st.stop()
+
+    col_y, col_agg = st.columns([0.6, 0.4])
+
+    with col_y:
+        y_axis = st.selectbox(
+            "**Metric**: what you want to analyze (y-axis)",
+            options=numeric_cols,
+            index=None,
+            placeholder="Choose a numeric field",
+            help="Pick a numeric value to analyze (e.g., Sales, Profit, Quantity).",
+            key=y_key,
+        )
+
+    with col_agg:
+        agg_func = st.selectbox(
+            "**Calculation**: total, average, etc.",
+            options=agg_options,
+            index=None,
+            placeholder="Choose",
+            help="Choose which the Calculation you want to peform on the numerical field choosen.",
+            key=agg_key,
+        )
+
+    if y_axis is None:
+        st.stop()
+
+    if agg_func is None:
+        st.stop()
 
     x_axis = st.selectbox(
-        "Select the X-axis",
-        options=columns,
+        "**Breakdown:** How do you want to break the measure down? (x-axis)",
+        options=group_cols,
         index=None,
-        placeholder="Choose a column",
+        placeholder="Choose a category or date",
+        help="Pick a field to group results by (e.g., Region, Product, Month).",
         key=x_key,
     )
     if x_axis is None:
         st.stop()
+
+    y_s = df[y_axis]
+    y_is_numeric = is_numeric_dtype(y_s)
 
     x_s = df[x_axis]
     x_sem = column_semantics.get(x_axis)
@@ -239,46 +294,6 @@ def render_visualizations_section(
     x_is_date_like = (x_sem == sem_date_value) or is_datetime64_any_dtype(x_s)
     x_is_cat = is_categorical_dtype(x_s)
     x_is_numeric = is_numeric_dtype(x_s)
-
-    agg_func: Optional[str] = None
-
-    if x_is_cat or x_is_date_like:
-        col_y, col_agg = st.columns([2, 1])
-
-        with col_y:
-            y_axis = st.selectbox(
-                "Select the Y-axis",
-                options=columns,
-                index=None,
-                placeholder="Choose a column",
-                key=y_key,
-            )
-
-        with col_agg:
-            agg_func = st.selectbox(
-                "Aggregation",
-                options=agg_options,
-                index=None,
-                placeholder="Choose",
-                key=agg_key,
-            )
-    else:
-        y_axis = st.selectbox(
-            "Select the Y-axis",
-            options=columns,
-            index=None,
-            placeholder="Choose a column",
-            key=y_key,
-        )
-
-    if y_axis is None:
-        st.stop()
-
-    if (x_is_cat or x_is_date_like) and agg_func is None:
-        st.stop()
-
-    y_s = df[y_axis]
-    y_is_numeric = is_numeric_dtype(y_s)
 
     plot_list = compatible_plots(
         x_is_categorical=x_is_cat,
@@ -290,30 +305,30 @@ def render_visualizations_section(
     )
 
     if not plot_list:
-        st.warning("No compatible plots for the selected columns.")
+        st.warning("No compatible charts for the selected fields.")
         st.stop()
 
     if len(plot_list) == 1:
         plot_type = plot_list[0]
     else:
         plot_type = st.selectbox(
-            "Select the type of plot",
+            "Chart type",
             options=plot_list,
             index=None,
-            placeholder="Choose a plot type",
+            placeholder="Choose a chart",
             key=plot_key,
         )
         if plot_type is None:
             st.stop()
 
-    generate_clicked = st.button("Generate Plot")
+    generate_clicked = st.button("Generate Chart")
 
     if generate_clicked:
         st.session_state.viz_has_generated = True
         info_slot.empty()
 
         agg_part = f" ({agg_func})" if agg_func else ""
-        st.caption(f"{plot_type} of{agg_part}  {y_axis} by {x_axis}")
+        st.caption(f"{plot_type}{agg_part}: {y_axis} by {x_axis}")
 
         try:
             if plot_type == PLOT_BAR:
@@ -321,7 +336,7 @@ def render_visualizations_section(
                     df,
                     x_axis=x_axis,
                     y_axis=y_axis,
-                    agg_func=agg_func,  # required here
+                    agg_func=agg_func,
                     agg_sum_value=agg_sum_value,
                     agg_avg_value=agg_avg_value,
                 )
@@ -334,16 +349,12 @@ def render_visualizations_section(
                 )
 
             elif plot_type == PLOT_LINE:
-                if not y_is_numeric:
-                    st.error("Line Chart requires a numeric Y-axis.")
-                    st.stop()
-
                 fig = make_line_chart(
                     df,
                     x_axis=x_axis,
                     y_axis=y_axis,
                     x_is_date_like=x_is_date_like,
-                    agg_func=agg_func,  # only required when x_is_date_like
+                    agg_func=agg_func,
                     x_semantic=x_sem,
                     sem_date_value=sem_date_value,
                     agg_sum_value=agg_sum_value,
@@ -359,5 +370,5 @@ def render_visualizations_section(
             plt.close(fig)
 
         except Exception as e:
-            st.error(f"❌ Failed to generate plot: {e}")
+            st.error(f"❌ Failed to generate chart: {e}")
             st.exception(e)

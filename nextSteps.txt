@@ -1,11 +1,3 @@
-// more user friendly, away from x-axis
-What you want to analyse (y-axis, usually numerical value like sales)
-According to which dimention (x-axis, usually category/ date, for exaple sales by Region)
-X Axis: Category/ Date by wich you want to analyse data 
-
--- better logic
-show only correct data type to choose among
-
 // ONLY AT END
 Refactoring: devide big main into smaller .py files 
 
@@ -19,6 +11,9 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
 
 // Paid version: save graph, export results in ppt
 // Premium: AGENT, read Data, agent does everything, user has no idea about data
+
+// DONE 16.01 
+Visualisations: X, Y and aggregation: Naming/ user Friendly & logic: show only column with relevant data type
 
 // DONE 01-15
 Section visualisation 
