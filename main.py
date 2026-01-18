@@ -19,8 +19,12 @@ from pandas.api.types import (
 )
 
 # ==============================================================================
-# Constants (single source of truth for "magic strings")
+# Set-up 
 # ==============================================================================
+
+# ------------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------------
 
 # File extensions
 EXT_CSV = ".csv"
@@ -48,26 +52,20 @@ MSG_NO_DATA_LOADED = "No data loaded. Please select a valid file/sheet."
 MSG_NO_FILES_FOUND = "No .csv or .xlsx files found in the data folder."
 MSG_FOLDER_NOT_FOUND_PREFIX = "Data folder not found:"
 
+# ------------------------------------------------------------------
+# Derived df: apply overrides (User Type Changes) WITHOUT mutating raw_df
+# ------------------------------------------------------------------
 
-# ==============================================================================
-# Derived df (apply overrides WITHOUT mutating raw_df)
-# ==============================================================================
-
+# turns dict into a hashable value (stable for caching), e.g. column_semantics = {"OrderDate": "date"}
 def _freeze_dict(d: dict[str, str]) -> tuple[tuple[str, str], ...]:
-    """Makes a dict hashable/stable for caching."""
     return tuple(sorted(d.items()))
 
-
+# create a derived dataframe from raw_df, according to user's conversions/ overrides (type changes)
 def apply_type_overrides(
     raw_df: pd.DataFrame,
     type_overrides: dict[str, str],
     column_semantics: dict[str, str],
 ) -> pd.DataFrame:
-    """
-    Returns a derived df with user-requested type conversions applied.
-    Does NOT mutate raw_df.
-    Uses copy(deep=False) so only converted columns allocate new arrays.
-    """
     if not type_overrides and not column_semantics:
         return raw_df
 
@@ -106,13 +104,9 @@ def apply_type_overrides(
 
 @st.cache_data(show_spinner=False)
 def to_datetime_cached(s: pd.Series) -> pd.Series:
-    """
-    Cached datetime parsing to avoid re-parsing the same column multiple times
-    (preview, KPI date detection, date line charts).
-    """
     return pd.to_datetime(s, errors="coerce")
 
-
+# apply overrides and return derived df
 @st.cache_data(show_spinner=True)
 def load_derived_df_cached(
     path: str,
@@ -122,26 +116,17 @@ def load_derived_df_cached(
     frozen_type_overrides: tuple[tuple[str, str], ...],
     frozen_column_semantics: tuple[tuple[str, str], ...],
 ) -> pd.DataFrame:
-    """
-    Cached entry point for: raw load + applying overrides.
-    Cache invalidates when file changes (token) OR overrides/semantics change.
-    """
     raw_df = data_loader.load_raw_df_cached(path, ext, sheet_name, token)
     type_overrides = dict(frozen_type_overrides)
     column_semantics = dict(frozen_column_semantics)
     return apply_type_overrides(raw_df, type_overrides, column_semantics)
 
-
 # ==============================================================================
-# App setup
+# Select file, read and cache data
 # ==============================================================================
 
 st.set_page_config(page_title="IDAA", layout="centered", page_icon="📊")
 st.title("📈  Intelligent Data Analyser APP")
-
-# ==============================================================================
-# Selecting the file
-# ==============================================================================
 
 working_dir = os.path.dirname(os.path.abspath(__file__))
 folder_path = f"{working_dir}/data"
@@ -186,12 +171,8 @@ def get_dataset_state(dataset_key: tuple[str, str | None]):
     return entry["type_overrides"], entry["column_semantics"]
 
 
-# ==============================================================================
-# Dataset selection (sheet) + cached df load
-# ==============================================================================
-
+# ----  Dataset selection (sheet) + cached df load
 sheet_name: str | None = None
-
 if ext == EXT_XLSX:
     try:
         sheet_names = data_loader.list_excel_sheets_cached(file_path, token)
@@ -405,4 +386,3 @@ elif section == "Visualizations":
         agg_avg_value=AGG_AVERAGE,
         to_datetime_fn=to_datetime_cached,
     )
-
