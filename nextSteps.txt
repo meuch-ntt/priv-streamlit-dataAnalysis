@@ -1,8 +1,9 @@
 // ONLY AT END
 Refactoring: devide big main into smaller .py files 
 
+product name as category, doesnt make sense .. too many classes...
+
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
-    -doesnt distinguish between numerical/ float/ in, for him all numericals 
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
 
@@ -11,6 +12,11 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
 
 // Paid version: save graph, export results in ppt
 // Premium: AGENT, read Data, agent does everything, user has no idea about data
+
+
+// CONE 24.01 
+refactoring many small .py files
+
 
 // DONE 16.01 
 Visualisations: X, Y and aggregation: Naming/ user Friendly & logic: show only column with relevant data type

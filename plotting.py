@@ -5,7 +5,6 @@ from typing import Callable, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
-import seaborn as sns
 import streamlit as st
 from pandas.api.types import is_categorical_dtype, is_datetime64_any_dtype, is_numeric_dtype
 
@@ -53,6 +52,8 @@ def make_bar_chart(
     agg_sum_value: str,
     agg_avg_value: str,
 ) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
     fig, ax = plt.subplots(figsize=(6, 4))
 
     if agg_func == agg_sum_value:
@@ -109,7 +110,14 @@ def make_pie_chart(
     *,
     x_axis: str,
     y_axis: str,
+    agg_func: str,
+    agg_sum_value: str,
 ) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
+    if agg_func != agg_sum_value:
+        raise ValueError("Pie chart supports sum only.")
+
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
     pie_data = df.groupby(x_axis)[y_axis].sum().sort_values(ascending=False)
@@ -159,12 +167,15 @@ def make_line_chart(
     agg_avg_value: str,
     to_datetime_fn: Callable[[pd.Series], pd.Series],
 ) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
     fig, ax = plt.subplots(figsize=(6, 4))
 
     line_df = df[[x_axis, y_axis]].dropna().copy()
 
     if x_is_date_like:
-        line_df[x_axis] = to_datetime_fn(line_df[x_axis])
+        if not is_datetime64_any_dtype(line_df[x_axis]):
+            line_df[x_axis] = to_datetime_fn(line_df[x_axis])
 
         if x_semantic == sem_date_value:
             line_df[x_axis] = line_df[x_axis].dt.normalize()
@@ -181,6 +192,13 @@ def make_line_chart(
         ax.tick_params(axis="x", rotation=45)
 
     else:
+        if agg_func == agg_sum_value:
+            line_df = line_df.groupby(x_axis, as_index=False)[y_axis].sum()
+        elif agg_func == agg_avg_value:
+            line_df = line_df.groupby(x_axis, as_index=False)[y_axis].mean()
+        else:
+            raise ValueError(f"Unsupported aggregation: {agg_func}")
+
         line_df = line_df.sort_values(by=x_axis)
         sns.lineplot(x=line_df[x_axis], y=line_df[y_axis], ax=ax)
 
@@ -346,6 +364,8 @@ def render_visualizations_section(
                     df,
                     x_axis=x_axis,
                     y_axis=y_axis,
+                    agg_func=agg_func,
+                    agg_sum_value=agg_sum_value,
                 )
 
             elif plot_type == PLOT_LINE:

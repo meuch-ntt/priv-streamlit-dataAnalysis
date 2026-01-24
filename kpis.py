@@ -57,7 +57,8 @@ def _detect_date_like(
     """
     # semantic override
     if semantic == sem_date_value:
-        return to_datetime_fn(s0), True
+        dt = to_datetime_fn(s0)
+        return dt, dt.notna().any()
 
     # already datetime dtype
     if is_datetime64_any_dtype(s0):
