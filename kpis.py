@@ -10,6 +10,7 @@ from pandas.api.types import (
     is_datetime64_any_dtype,
     is_numeric_dtype,
     is_object_dtype,
+    is_string_dtype,
 )
 
 
@@ -195,10 +196,8 @@ def render_kpi_section(
         return
 
     # -------------------------
-    # categorical
+    # category-like (category + text)
     # -------------------------
-    if is_categorical_dtype(s0):
+    if is_categorical_dtype(s0) or is_object_dtype(s0) or is_string_dtype(s0):
         _render_metrics_grid(categorical_kpis(s0), kpi_column, max_items=3)
         return
-
-    st.warning(f"The column '{kpi_column}' is not a supported type for KPIs (dtype={s0.dtype}).")

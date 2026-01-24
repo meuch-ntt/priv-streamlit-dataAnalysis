@@ -16,15 +16,19 @@ PLOT_LINE = "Line Chart"
 PLOT_CUMULATIVE_LINE = "Cumulative Line"
 PLOT_SCATTER = "Scatter Plot"
 PLOT_HIST = "Distribution"
+PLOT_TOPN_TABLE = "Summary Table"
+PLOT_HEATMAP = "Heatmap"
 
 # Business-friendly labels (UI only)
 PLOT_LABELS = {
-    PLOT_BAR: "Compare values across categories",
-    PLOT_PIE: "Share of total",
-    PLOT_LINE: "Trend over time",
+    PLOT_BAR: "Top categories (bar chart)",
+    PLOT_TOPN_TABLE: "Top categories (table)",
+    PLOT_PIE: "Share of total (pie chart)",
+    PLOT_LINE: "Trend over time (line chart)",
     PLOT_CUMULATIVE_LINE: "Growth over time (cumulative)",
-    PLOT_SCATTER: "Relationship between two metrics",
+    PLOT_SCATTER: "Relationship between two metrics (correlation)",
     PLOT_HIST: "Value distribution",
+    PLOT_HEATMAP: "Heatmap (two categories)",
 }
 
 
@@ -33,20 +37,29 @@ def compatible_plots(
     x_is_categorical: bool,
     x_is_date_like: bool,
     x_is_numeric: bool,
+    x_is_text: bool,
     y_is_numeric: bool,
     agg_func: Optional[str],
     agg_sum_value: str,
+    can_heatmap: bool,
 ) -> list[str]:
     """
     Decide which plots are compatible with the current x/y selection.
     """
     plots: list[str] = []
 
-    # Category × Numeric
+    # Category-like (categorical) × Numeric
     if x_is_categorical and y_is_numeric:
         plots.append(PLOT_BAR)
+        plots.append(PLOT_TOPN_TABLE)
         if agg_func == agg_sum_value:
             plots.append(PLOT_PIE)
+
+    # Text × Numeric (NO bar chart)
+    if x_is_text and y_is_numeric:
+        plots.append(PLOT_TOPN_TABLE)
+        if can_heatmap:
+            plots.append(PLOT_HEATMAP)
 
     # Date × Numeric
     if x_is_date_like and y_is_numeric:
@@ -86,7 +99,9 @@ def make_bar_chart(
     bar_df[x_axis] = bar_df[x_axis].astype(str)
 
     sns.barplot(x=bar_df[x_axis], y=bar_df[value_col], ax=ax, order=x_order)
-    ax.tick_params(axis="x", rotation=45)
+
+    # Keep labels readable
+    ax.tick_params(axis="x", rotation=90)
 
     ymax = bar_df[value_col].max()
     if pd.notna(ymax) and ymax != 0:
@@ -123,6 +138,36 @@ def make_bar_chart(
     return fig
 
 
+def make_category_summary_table(
+    df: pd.DataFrame,
+    *,
+    x_axis: str,
+    y_axis: str,
+    agg_func: str,
+    agg_sum_value: str,
+    agg_avg_value: str,
+    top_rows: int = 20,
+) -> pd.DataFrame:
+    """
+    Create a category summary table:
+    aggregated metric (y) using agg_func by category (x), sorted highest first.
+    """
+    if agg_func == agg_sum_value:
+        out = df.groupby(x_axis)[y_axis].sum().reset_index(name=agg_sum_value)
+        value_col = agg_sum_value
+    elif agg_func == agg_avg_value:
+        out = df.groupby(x_axis)[y_axis].mean().reset_index(name=agg_avg_value)
+        value_col = agg_avg_value
+    else:
+        raise ValueError(f"Unsupported aggregation: {agg_func}")
+
+    out[x_axis] = out[x_axis].astype(str)
+    out = out.sort_values(by=value_col, ascending=False).head(top_rows)
+
+    out.insert(0, "Rank", range(1, len(out) + 1))
+    return out
+
+
 def make_pie_chart(
     df: pd.DataFrame,
     *,
@@ -140,7 +185,6 @@ def make_pie_chart(
 
     pie_data = df.groupby(x_axis)[y_axis].sum().sort_values(ascending=False)
 
-    # Avoid clutter for tiny slices
     def autopct_fn(pct: float) -> str:
         return f"{pct:.1f}%" if pct >= 3 else ""
 
@@ -207,8 +251,7 @@ def make_line_chart(
 
         line_df = line_df.sort_values(by=x_axis)
         sns.lineplot(x=line_df[x_axis], y=line_df[y_axis], ax=ax)
-        ax.tick_params(axis="x", rotation=45)
-
+        ax.tick_params(axis="x", rotation=90)
     else:
         if agg_func == agg_sum_value:
             line_df = line_df.groupby(x_axis, as_index=False)[y_axis].sum()
@@ -311,12 +354,76 @@ def make_histogram(df: pd.DataFrame, *, y_axis: str) -> plt.Figure:
     return fig
 
 
+def make_heatmap(
+    df: pd.DataFrame,
+    *,
+    x_axis: str,
+    y_axis: str,
+    heatmap_by: str,
+    agg_func: str,
+    agg_sum_value: str,
+    agg_avg_value: str,
+    top_rows: int = 20,
+    top_cols: int = 20,
+) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
+    work = df[[x_axis, heatmap_by, y_axis]].dropna().copy()
+    work[x_axis] = work[x_axis].astype(str)
+    work[heatmap_by] = work[heatmap_by].astype(str)
+
+    if agg_func == agg_sum_value:
+        grouped = work.groupby([x_axis, heatmap_by], as_index=False)[y_axis].sum()
+        value_name = agg_sum_value
+    elif agg_func == agg_avg_value:
+        grouped = work.groupby([x_axis, heatmap_by], as_index=False)[y_axis].mean()
+        value_name = agg_avg_value
+    else:
+        raise ValueError(f"Unsupported aggregation: {agg_func}")
+
+    grouped = grouped.rename(columns={y_axis: value_name})
+
+    pivot = grouped.pivot_table(
+        index=x_axis,
+        columns=heatmap_by,
+        values=value_name,
+        aggfunc="sum",
+        fill_value=0,
+    )
+
+    row_order = pivot.sum(axis=1).sort_values(ascending=False).head(int(top_rows)).index
+    col_order = pivot.sum(axis=0).sort_values(ascending=False).head(int(top_cols)).index
+    pivot = pivot.loc[row_order, col_order]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    sns.heatmap(pivot, ax=ax, cmap="Blues")
+    ax.set_title(f"{PLOT_HEATMAP}: {y_axis} by {x_axis} and {heatmap_by}", fontsize=12)
+    ax.set_xlabel(heatmap_by, fontsize=10)
+    ax.set_ylabel(x_axis, fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def _numeric_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if is_numeric_dtype(df[c])]
 
 
 def _category_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if is_categorical_dtype(df[c])]
+
+
+def _text_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Text fields (kept as-is) that can still be used as labels in charts.
+    """
+    cols: list[str] = []
+    for c in df.columns:
+        s = df[c]
+        if is_categorical_dtype(s) or is_numeric_dtype(s) or is_datetime64_any_dtype(s):
+            continue
+        if s.dtype == "object" or str(s.dtype) == "string":
+            cols.append(c)
+    return cols
 
 
 def _date_columns(df: pd.DataFrame, column_semantics: dict[str, str], sem_date_value: str) -> list[str]:
@@ -334,6 +441,14 @@ def _auto_index_for_single_option(options: list[str]) -> Optional[int]:
     Return an index for auto-selection when only one option exists.
     """
     return 0 if len(options) == 1 else None
+
+def _label_breakdown_option(col: str, *, text_cols: list[str]) -> str:
+    if col in text_cols:
+        return f"{col} (limited to Top 20)"
+    return col
+
+def _is_text_field(col: str, *, text_cols: list[str]) -> bool:
+    return col in text_cols
 
 
 def render_visualizations_section(
@@ -356,7 +471,6 @@ def render_visualizations_section(
     """
     st.subheader("📊 Visualizations")
 
-    # show info until user generated at least one plot
     if "viz_has_generated" not in st.session_state:
         st.session_state.viz_has_generated = False
 
@@ -366,6 +480,7 @@ def render_visualizations_section(
 
     numeric_cols = _numeric_columns(df)
     cat_cols = _category_columns(df)
+    text_cols = _text_columns(df)
     date_cols = _date_columns(df, column_semantics, sem_date_value)
 
     if not numeric_cols:
@@ -373,17 +488,29 @@ def render_visualizations_section(
         st.stop()
 
     mode = st.radio(
-        "What do you want to analyze?",
-        options=["Compare categories", "Trend over time", "Relationship between two metrics"],
+        "Which kind analysis you want to perform?",
+        options=[
+            "Compare categories",
+            "Trend over time",
+            "Relationship between two metrics",
+        ],
         horizontal=True,
+        help=(
+            "1. **Compare categories**\n"
+            "Compare totals or averages across groups or categories.\n"
+            "2. **Trend over time**\n"
+            "See how a metric changes over time, including trends, peaks, and drops.\n"
+            "3. **Relationship between two metrics**\n"
+            "See if two metrics move together and identify patterns or outliers."
+        ),
     )
 
     if mode == "Compare categories":
-        st.caption("Compare totals/averages across groups like Region, Product, Customer Segment.")
+        st.caption("Compare totals/averages across groups or categories.")
     elif mode == "Trend over time":
-        st.caption("See how a metric changes over time (daily/weekly/monthly).")
+        st.caption("See how a metric changes over time: trends, peaks, and drops.")
     else:
-        st.caption("See if two metrics move together (correlation/outliers).")
+        st.caption("See if two metrics move together and identify patterns or outliers.")
 
     # ------------------------------------------------------------------
     # Mode: Relationship (Scatter)
@@ -418,11 +545,7 @@ def render_visualizations_section(
         )
 
         ready = (x_metric is not None) and (y_metric is not None)
-
-        if ready:
-            generate_clicked = st.button("Generate Chart")
-        else:
-            generate_clicked = False
+        generate_clicked = st.button("Generate Chart") if ready else False
 
         if generate_clicked:
             st.session_state.viz_has_generated = True
@@ -442,7 +565,6 @@ def render_visualizations_section(
 
     # ------------------------------------------------------------------
     # Modes: Compare categories / Trend over time
-    # (layout kept the same as your summarize flow)
     # ------------------------------------------------------------------
     col_y, col_agg = st.columns([0.6, 0.4])
 
@@ -468,20 +590,22 @@ def render_visualizations_section(
         )
 
     if mode == "Compare categories":
-        if not cat_cols:
-            st.warning("No category fields available to compare.")
+        compare_options = cat_cols + [c for c in text_cols if c not in cat_cols]
+        if not compare_options:
+            st.warning("No category or text fields available to compare.")
             st.stop()
 
         x_axis = st.selectbox(
             "Breakdown: How do you want to break the measure down?",
-            options=cat_cols,
-            index=_auto_index_for_single_option(cat_cols),
-            placeholder="Choose a category",
-            help="Pick a field to group results by (x-axis, e.g., Region, Product, Segment).",
+            options=compare_options,
+            index=_auto_index_for_single_option(compare_options),
+            placeholder="Choose a field",
+            format_func=lambda c: _label_breakdown_option(c, text_cols=text_cols),
+            help="Pick a field to group results by (x-axis).",
             key=x_key,
         )
 
-    else:  # Trend over time
+    else:
         if not date_cols:
             st.warning("No date fields available for trends over time.")
             st.stop()
@@ -501,9 +625,12 @@ def render_visualizations_section(
     x_is_date_like = False
     x_sem: Optional[str] = None
 
+    heatmap_by: Optional[str] = None
+    HEAT_TOP_ROWS = 20
+    HEAT_TOP_COLS = 20
+
     if ready:
-        y_s = df[y_axis]
-        y_is_numeric = is_numeric_dtype(y_s)
+        y_is_numeric = is_numeric_dtype(df[y_axis])
 
         x_s = df[x_axis]
         x_sem = column_semantics.get(x_axis)
@@ -511,14 +638,20 @@ def render_visualizations_section(
         x_is_date_like = (x_sem == sem_date_value) or is_datetime64_any_dtype(x_s)
         x_is_cat = is_categorical_dtype(x_s)
         x_is_num = is_numeric_dtype(x_s)
+        x_is_text = (x_s.dtype == "string") or (x_s.dtype == "object")
+
+        heatmap_options = [c for c in (cat_cols + text_cols) if c != x_axis]
+        can_heatmap = (mode == "Compare categories") and x_is_text and (len(heatmap_options) > 0)
 
         plot_list = compatible_plots(
             x_is_categorical=x_is_cat,
+            x_is_text=x_is_text,
             x_is_date_like=x_is_date_like,
             x_is_numeric=x_is_num,
             y_is_numeric=y_is_numeric,
             agg_func=agg_func,
             agg_sum_value=agg_sum_value,
+            can_heatmap=can_heatmap,
         )
 
         if not plot_list:
@@ -529,27 +662,50 @@ def render_visualizations_section(
             plot_type = plot_list[0]
         else:
             plot_type = st.selectbox(
-                "Chart type",
+                "Visual type",
                 options=plot_list,
                 index=_auto_index_for_single_option(plot_list),
                 format_func=lambda p: PLOT_LABELS.get(p, p),
-                placeholder="Choose a chart",
+                placeholder="Choose",
                 key=plot_key,
             )
 
-    ready_to_generate = ready and (plot_type is not None)
+        if plot_type == PLOT_HEATMAP:
+            heatmap_by = st.selectbox(
+                "Second category (for heatmap)",
+                options=heatmap_options,
+                index=_auto_index_for_single_option(heatmap_options),
+                placeholder="Choose a field",
+                help="Adds a second category so the heatmap can show a grid of values.",
+                key="heatmap_by",
+            )
 
-    if ready_to_generate:
-        generate_clicked = st.button("Generate Chart")
-    else:
-        generate_clicked = False
+    ready_to_generate = ready and (plot_type is not None)
+    if plot_type == PLOT_HEATMAP:
+        ready_to_generate = ready_to_generate and (heatmap_by is not None)
+
+    generate_clicked = st.button("Generate") if ready_to_generate else False
 
     if generate_clicked:
         st.session_state.viz_has_generated = True
         info_slot.empty()
 
+        # Hint for text-based breakdowns
+        hint = ""
+        if mode == "Compare categories" and _is_text_field(x_axis, text_cols=text_cols):
+            hint = " (limited to Top 20)"
+
         agg_part = f" ({agg_func})" if agg_func else ""
-        st.caption(f"{PLOT_LABELS.get(plot_type, plot_type)}{agg_part}: {y_axis} by {x_axis}")
+
+        title = (
+            f"{PLOT_LABELS.get(plot_type, plot_type)}: "
+            f"{y_axis}{agg_part} by {x_axis}{hint}"
+        )
+
+        if plot_type == PLOT_HEATMAP and heatmap_by is not None:
+            title += f" and {heatmap_by}"
+
+        st.caption(title)
 
         try:
             if plot_type == PLOT_BAR:
@@ -561,6 +717,20 @@ def render_visualizations_section(
                     agg_sum_value=agg_sum_value,
                     agg_avg_value=agg_avg_value,
                 )
+                st.pyplot(fig)
+                plt.close(fig)
+
+            elif plot_type == PLOT_TOPN_TABLE:
+                summary_df = make_category_summary_table(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    agg_func=agg_func,
+                    agg_sum_value=agg_sum_value,
+                    agg_avg_value=agg_avg_value,
+                    top_rows=20,
+                )
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
             elif plot_type == PLOT_PIE:
                 fig = make_pie_chart(
@@ -570,6 +740,8 @@ def render_visualizations_section(
                     agg_func=agg_func,
                     agg_sum_value=agg_sum_value,
                 )
+                st.pyplot(fig)
+                plt.close(fig)
 
             elif plot_type == PLOT_LINE:
                 fig = make_line_chart(
@@ -584,6 +756,8 @@ def render_visualizations_section(
                     agg_avg_value=agg_avg_value,
                     to_datetime_fn=to_datetime_fn,
                 )
+                st.pyplot(fig)
+                plt.close(fig)
 
             elif plot_type == PLOT_CUMULATIVE_LINE:
                 fig = make_cumulative_line_chart(
@@ -594,14 +768,28 @@ def render_visualizations_section(
                     sem_date_value=sem_date_value,
                     to_datetime_fn=to_datetime_fn,
                 )
+                st.pyplot(fig)
+                plt.close(fig)
+
+            elif plot_type == PLOT_HEATMAP:
+                fig = make_heatmap(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    heatmap_by=str(heatmap_by),
+                    agg_func=agg_func,
+                    agg_sum_value=agg_sum_value,
+                    agg_avg_value=agg_avg_value,
+                    top_rows=HEAT_TOP_ROWS,
+                    top_cols=HEAT_TOP_COLS,
+                )
+                st.pyplot(fig)
+                plt.close(fig)
 
             else:
                 st.error(f"Unsupported plot type: {plot_type}")
                 st.stop()
 
-            st.pyplot(fig)
-            plt.close(fig)
-
         except Exception as e:
-            st.error(f"❌ Failed to generate chart: {e}")
+            st.error(f"❌ Failed to generate output: {e}")
             st.exception(e)

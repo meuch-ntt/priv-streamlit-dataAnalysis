@@ -1,3 +1,31 @@
+add explanation for data preview,type of data: category vs text 
+BUG: i should not offerbar chart for text 
+
+also when one only graph type possible, show it selected
+
+
+explain heat map hat only 20 categories
+
+TOP-N
+
+text field -> category like
+
+type of analysis 3D 
+- 
+
+metric - metric relationship
+- same same -> error  
+
+advanced analysis
+- 2D: heat map
+  add new graph type: heat mep, if x axis: text: 
+  Top columns: all possible 
+
+
+- 2D: stacked bar chart
+- histogram
+- sepecif analysis, gimme datapoint having value X = "abc"/ >= 
+
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
@@ -8,9 +36,26 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
 // Paid version: save graph, export results in ppt
 // Premium: AGENT, read Data, agent does everything, user has no idea about data
 
+-----------------------------
+PUSH
+-----------------------------
+// DONE 25.01
+heatmap NEW
+table visual
+kpi.py category-like
+
 
 // DONE 24.01 (2)
+visualisation [WIP] refined: more graph/ better naming/ separation using radio button
+sort bar charts
 type auto-detection
+
+
+// DONE 24.01 (2)
+visualisation [WIP] refined: more graph/ better naming/ separation using radio button
+sort bar charts
+type auto-detection
+
 
 // DONE 24.01 (1)
 Refactoring: devide big main into smaller .py files 
