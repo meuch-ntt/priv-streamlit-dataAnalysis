@@ -1,3 +1,89 @@
+'''deleted
+
+# ==============================================================================
+# Changing the Type
+# ==============================================================================
+
+st.subheader("🔧 Changing the Type")
+
+# show info until user clicked "Change Type" at least once
+if "change_type_has_clicked" not in st.session_state:
+    st.session_state.change_type_has_clicked = False
+
+info_slot = st.empty()
+if not st.session_state.change_type_has_clicked:
+    info_slot.info("Optionally force a different type if it was not interpreted correctly.")
+
+# reset widgets after successful change
+if st.session_state.get("_reset_change_type_widgets", False):
+    st.session_state["change_type_cols"] = []
+    st.session_state["change_type_target"] = None
+    st.session_state["_reset_change_type_widgets"] = False
+
+col1, col2, col3 = st.columns([3, 3, 1.5])
+
+with col1:
+    choose_cols = st.multiselect(
+        "Change the type of specific columns",
+        options=columns,
+        key="change_type_cols",
+    )
+
+with col2:
+    target_type = st.selectbox(
+        "Set type to:",
+        options=TARGET_OPTIONS,
+        index=None,
+        placeholder="Choose an option",
+        key="change_type_target",
+    )
+
+with col3:
+    st.markdown(
+        "<div style='margin-bottom: 6px; font-weight: bold;'>Confirm</div>",
+        unsafe_allow_html=True,
+    )
+    change_type_clicked = st.button("Change Type")
+
+if choose_cols and target_type and change_type_clicked:
+    st.session_state.change_type_has_clicked = True
+    info_slot.empty()
+
+    try:
+        for col in choose_cols:
+            if target_type == TARGET_DATE:
+                type_overrides[col] = TARGET_DATETIME
+                semantics_overrides[col] = SEM_DATE
+            else:
+                type_overrides[col] = target_type
+                semantics_overrides.pop(col, None)
+
+        # Persist overrides per dataset
+        if hasattr(dataset_selector, "set_dataset_state"):
+            dataset_selector.set_dataset_state(dataset_key, type_overrides, semantics_overrides)
+
+        st.session_state["change_type_success_msg"] = (
+            f'✅ Column(s) "{", ".join(choose_cols)}" type changed successfully. '
+            "See data preview above."
+        )
+        st.session_state["change_type_success"] = True
+        st.session_state["_reset_change_type_widgets"] = True
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"❌ An unexpected error occurred: {e}")
+
+if st.session_state.get("change_type_success"):
+    st.success(st.session_state["change_type_success_msg"])
+    st.session_state["change_type_success"] = False
+
+
+'''
+
+
+
+
+
 ##################################### 
 # KPI Session as dropdown
 

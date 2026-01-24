@@ -9,10 +9,23 @@ import streamlit as st
 from pandas.api.types import is_categorical_dtype, is_datetime64_any_dtype, is_numeric_dtype
 
 
-# Plot names
+# Plot names (internal)
 PLOT_BAR = "Bar Chart"
 PLOT_PIE = "Pie Chart"
 PLOT_LINE = "Line Chart"
+PLOT_CUMULATIVE_LINE = "Cumulative Line"
+PLOT_SCATTER = "Scatter Plot"
+PLOT_HIST = "Distribution"
+
+# Business-friendly labels (UI only)
+PLOT_LABELS = {
+    PLOT_BAR: "Compare values across categories",
+    PLOT_PIE: "Share of total",
+    PLOT_LINE: "Trend over time",
+    PLOT_CUMULATIVE_LINE: "Growth over time (cumulative)",
+    PLOT_SCATTER: "Relationship between two metrics",
+    PLOT_HIST: "Value distribution",
+}
 
 
 def compatible_plots(
@@ -29,16 +42,17 @@ def compatible_plots(
     """
     plots: list[str] = []
 
+    # Category × Numeric
     if x_is_categorical and y_is_numeric:
         plots.append(PLOT_BAR)
         if agg_func == agg_sum_value:
             plots.append(PLOT_PIE)
 
+    # Date × Numeric
     if x_is_date_like and y_is_numeric:
         plots.append(PLOT_LINE)
-
-    if x_is_numeric and y_is_numeric:
-        plots.append(PLOT_LINE)
+        if agg_func == agg_sum_value:
+            plots.append(PLOT_CUMULATIVE_LINE)
 
     return plots
 
@@ -67,7 +81,11 @@ def make_bar_chart(
 
     bar_df = bar_df.sort_values(by=value_col, ascending=False)
 
-    sns.barplot(x=bar_df[x_axis], y=bar_df[value_col], ax=ax)
+    # Ensure the x-axis renders in descending order of the aggregated value
+    x_order = bar_df[x_axis].astype(str).tolist()
+    bar_df[x_axis] = bar_df[x_axis].astype(str)
+
+    sns.barplot(x=bar_df[x_axis], y=bar_df[value_col], ax=ax, order=x_order)
     ax.tick_params(axis="x", rotation=45)
 
     ymax = bar_df[value_col].max()
@@ -211,18 +229,111 @@ def make_line_chart(
     return fig
 
 
+def make_cumulative_line_chart(
+    df: pd.DataFrame,
+    *,
+    x_axis: str,
+    y_axis: str,
+    x_semantic: Optional[str],
+    sem_date_value: str,
+    to_datetime_fn: Callable[[pd.Series], pd.Series],
+) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    line_df = df[[x_axis, y_axis]].dropna().copy()
+
+    if not is_datetime64_any_dtype(line_df[x_axis]):
+        line_df[x_axis] = to_datetime_fn(line_df[x_axis])
+
+    if x_semantic == sem_date_value:
+        line_df[x_axis] = line_df[x_axis].dt.normalize()
+
+    line_df = line_df.groupby(x_axis, as_index=False)[y_axis].sum().sort_values(by=x_axis)
+    line_df["cumulative"] = line_df[y_axis].cumsum()
+
+    sns.lineplot(x=line_df[x_axis], y=line_df["cumulative"], ax=ax)
+    ax.tick_params(axis="x", rotation=45)
+
+    ax.set_title(f"{PLOT_CUMULATIVE_LINE} of {y_axis} by {x_axis}", fontsize=12)
+    ax.set_xlabel(x_axis, fontsize=10)
+    ax.set_ylabel(f"Cumulative {y_axis}", fontsize=10)
+
+    fig.tight_layout()
+    return fig
+
+
+def make_scatter_plot(
+    df: pd.DataFrame,
+    *,
+    x_axis: str,
+    y_axis: str,
+    hue: Optional[str] = None,
+) -> plt.Figure:
+    import seaborn as sns  # lazy import
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    cols = [x_axis, y_axis] + ([hue] if hue else [])
+    scatter_df = df[cols].dropna().copy()
+
+    sns.scatterplot(
+        data=scatter_df,
+        x=x_axis,
+        y=y_axis,
+        hue=hue if hue else None,
+        ax=ax,
+    )
+
+    ax.set_title(f"{PLOT_SCATTER}: {y_axis} vs {x_axis}", fontsize=12)
+    ax.set_xlabel(x_axis, fontsize=10)
+    ax.set_ylabel(y_axis, fontsize=10)
+
+    if hue:
+        ax.legend(title=hue, loc="best", frameon=False)
+
+    fig.tight_layout()
+    return fig
+
+
+def make_histogram(df: pd.DataFrame, *, y_axis: str) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    vals = df[y_axis].dropna()
+    ax.hist(vals, bins=20)
+
+    ax.set_title(f"{PLOT_HIST} of {y_axis}", fontsize=12)
+    ax.set_xlabel(y_axis, fontsize=10)
+    ax.set_ylabel("Count", fontsize=10)
+
+    fig.tight_layout()
+    return fig
+
+
 def _numeric_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if is_numeric_dtype(df[c])]
 
 
-def _category_or_date_columns(df: pd.DataFrame, column_semantics: dict[str, str], sem_date_value: str) -> list[str]:
+def _category_columns(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if is_categorical_dtype(df[c])]
+
+
+def _date_columns(df: pd.DataFrame, column_semantics: dict[str, str], sem_date_value: str) -> list[str]:
     cols: list[str] = []
     for c in df.columns:
         s = df[c]
         is_date = (column_semantics.get(c) == sem_date_value) or is_datetime64_any_dtype(s)
-        if is_date or is_categorical_dtype(s):
+        if is_date:
             cols.append(c)
     return cols
+
+
+def _auto_index_for_single_option(options: list[str]) -> Optional[int]:
+    """
+    Return an index for auto-selection when only one option exists.
+    """
+    return 0 if len(options) == 1 else None
 
 
 def render_visualizations_section(
@@ -254,99 +365,191 @@ def render_visualizations_section(
         info_slot.info("Choose what to measure and how to break it down, then generate a chart.")
 
     numeric_cols = _numeric_columns(df)
-    group_cols = _category_or_date_columns(df, column_semantics, sem_date_value)
+    cat_cols = _category_columns(df)
+    date_cols = _date_columns(df, column_semantics, sem_date_value)
 
     if not numeric_cols:
         st.warning("No numeric fields available to measure.")
         st.stop()
 
-    if not group_cols:
-        st.warning("No category or date fields available to break down by.")
-        st.stop()
+    mode = st.radio(
+        "What do you want to analyze?",
+        options=["Compare categories", "Trend over time", "Relationship between two metrics"],
+        horizontal=True,
+    )
 
+    if mode == "Compare categories":
+        st.caption("Compare totals/averages across groups like Region, Product, Customer Segment.")
+    elif mode == "Trend over time":
+        st.caption("See how a metric changes over time (daily/weekly/monthly).")
+    else:
+        st.caption("See if two metrics move together (correlation/outliers).")
+
+    # ------------------------------------------------------------------
+    # Mode: Relationship (Scatter)
+    # ------------------------------------------------------------------
+    if mode == "Relationship between two metrics":
+        colx, coly = st.columns(2)
+
+        with colx:
+            x_metric = st.selectbox(
+                "Metric for x-axis",
+                options=numeric_cols,
+                index=_auto_index_for_single_option(numeric_cols),
+                placeholder="Choose a numeric field",
+                help="Numeric metric (usually independent / explanatory variable).",
+                key="scatter_x_metric",
+            )
+        with coly:
+            y_metric = st.selectbox(
+                "Metric for y-axis",
+                options=numeric_cols,
+                index=_auto_index_for_single_option(numeric_cols),
+                placeholder="Choose a numeric field",
+                help="Numeric metric (usually dependent / outcome variable).",
+                key="scatter_y_metric",
+            )
+
+        hue = st.selectbox(
+            "Optional: breakdown by category",
+            options=[None] + cat_cols,
+            index=0,
+            key="scatter_hue",
+        )
+
+        ready = (x_metric is not None) and (y_metric is not None)
+
+        if ready:
+            generate_clicked = st.button("Generate Chart")
+        else:
+            generate_clicked = False
+
+        if generate_clicked:
+            st.session_state.viz_has_generated = True
+            info_slot.empty()
+
+            st.caption(f"{PLOT_LABELS[PLOT_SCATTER]}: {y_metric} vs {x_metric}")
+
+            try:
+                fig = make_scatter_plot(df, x_axis=x_metric, y_axis=y_metric, hue=hue)
+                st.pyplot(fig)
+                plt.close(fig)
+            except Exception as e:
+                st.error(f"❌ Failed to generate chart: {e}")
+                st.exception(e)
+
+        return
+
+    # ------------------------------------------------------------------
+    # Modes: Compare categories / Trend over time
+    # (layout kept the same as your summarize flow)
+    # ------------------------------------------------------------------
     col_y, col_agg = st.columns([0.6, 0.4])
 
     with col_y:
         y_axis = st.selectbox(
-            "**Metric**: what you want to analyze (y-axis)",
+            "Metric",
             options=numeric_cols,
-            index=None,
+            index=_auto_index_for_single_option(numeric_cols),
             placeholder="Choose a numeric field",
-            help="Pick a numeric value to analyze (e.g., Sales, Profit, Quantity).",
+            help="What you want to analyze (y-axis): numeric value to analyze (e.g., Sales, Profit, Quantity).",
             key=y_key,
         )
 
     with col_agg:
         agg_func = st.selectbox(
-            "**Calculation**: total, average, etc.",
+            "Measure as",
             options=agg_options,
-            index=None,
+            index=_auto_index_for_single_option(agg_options),
             placeholder="Choose",
-            help="Choose which the Calculation you want to peform on the numerical field choosen.",
+            format_func=lambda v: "Total" if v == agg_sum_value else ("Average" if v == agg_avg_value else str(v)),
+            help="Calculation you want to peform on the numerical field",
             key=agg_key,
         )
 
-    if y_axis is None:
-        st.stop()
-
-    if agg_func is None:
-        st.stop()
-
-    x_axis = st.selectbox(
-        "**Breakdown:** How do you want to break the measure down? (x-axis)",
-        options=group_cols,
-        index=None,
-        placeholder="Choose a category or date",
-        help="Pick a field to group results by (e.g., Region, Product, Month).",
-        key=x_key,
-    )
-    if x_axis is None:
-        st.stop()
-
-    y_s = df[y_axis]
-    y_is_numeric = is_numeric_dtype(y_s)
-
-    x_s = df[x_axis]
-    x_sem = column_semantics.get(x_axis)
-
-    x_is_date_like = (x_sem == sem_date_value) or is_datetime64_any_dtype(x_s)
-    x_is_cat = is_categorical_dtype(x_s)
-    x_is_numeric = is_numeric_dtype(x_s)
-
-    plot_list = compatible_plots(
-        x_is_categorical=x_is_cat,
-        x_is_date_like=x_is_date_like,
-        x_is_numeric=x_is_numeric,
-        y_is_numeric=y_is_numeric,
-        agg_func=agg_func,
-        agg_sum_value=agg_sum_value,
-    )
-
-    if not plot_list:
-        st.warning("No compatible charts for the selected fields.")
-        st.stop()
-
-    if len(plot_list) == 1:
-        plot_type = plot_list[0]
-    else:
-        plot_type = st.selectbox(
-            "Chart type",
-            options=plot_list,
-            index=None,
-            placeholder="Choose a chart",
-            key=plot_key,
-        )
-        if plot_type is None:
+    if mode == "Compare categories":
+        if not cat_cols:
+            st.warning("No category fields available to compare.")
             st.stop()
 
-    generate_clicked = st.button("Generate Chart")
+        x_axis = st.selectbox(
+            "Breakdown: How do you want to break the measure down?",
+            options=cat_cols,
+            index=_auto_index_for_single_option(cat_cols),
+            placeholder="Choose a category",
+            help="Pick a field to group results by (x-axis, e.g., Region, Product, Segment).",
+            key=x_key,
+        )
+
+    else:  # Trend over time
+        if not date_cols:
+            st.warning("No date fields available for trends over time.")
+            st.stop()
+
+        x_axis = st.selectbox(
+            "Date field",
+            options=date_cols,
+            index=_auto_index_for_single_option(date_cols),
+            placeholder="Choose a date field",
+            help="Pick a date field to trend over time (e.g., Order Date, Created At).",
+            key=x_key,
+        )
+
+    ready = (y_axis is not None) and (agg_func is not None) and (x_axis is not None)
+
+    plot_type: Optional[str] = None
+    x_is_date_like = False
+    x_sem: Optional[str] = None
+
+    if ready:
+        y_s = df[y_axis]
+        y_is_numeric = is_numeric_dtype(y_s)
+
+        x_s = df[x_axis]
+        x_sem = column_semantics.get(x_axis)
+
+        x_is_date_like = (x_sem == sem_date_value) or is_datetime64_any_dtype(x_s)
+        x_is_cat = is_categorical_dtype(x_s)
+        x_is_num = is_numeric_dtype(x_s)
+
+        plot_list = compatible_plots(
+            x_is_categorical=x_is_cat,
+            x_is_date_like=x_is_date_like,
+            x_is_numeric=x_is_num,
+            y_is_numeric=y_is_numeric,
+            agg_func=agg_func,
+            agg_sum_value=agg_sum_value,
+        )
+
+        if not plot_list:
+            st.warning("No compatible charts for the selected fields.")
+            return
+
+        if len(plot_list) == 1:
+            plot_type = plot_list[0]
+        else:
+            plot_type = st.selectbox(
+                "Chart type",
+                options=plot_list,
+                index=_auto_index_for_single_option(plot_list),
+                format_func=lambda p: PLOT_LABELS.get(p, p),
+                placeholder="Choose a chart",
+                key=plot_key,
+            )
+
+    ready_to_generate = ready and (plot_type is not None)
+
+    if ready_to_generate:
+        generate_clicked = st.button("Generate Chart")
+    else:
+        generate_clicked = False
 
     if generate_clicked:
         st.session_state.viz_has_generated = True
         info_slot.empty()
 
         agg_part = f" ({agg_func})" if agg_func else ""
-        st.caption(f"{plot_type}{agg_part}: {y_axis} by {x_axis}")
+        st.caption(f"{PLOT_LABELS.get(plot_type, plot_type)}{agg_part}: {y_axis} by {x_axis}")
 
         try:
             if plot_type == PLOT_BAR:
@@ -379,6 +582,16 @@ def render_visualizations_section(
                     sem_date_value=sem_date_value,
                     agg_sum_value=agg_sum_value,
                     agg_avg_value=agg_avg_value,
+                    to_datetime_fn=to_datetime_fn,
+                )
+
+            elif plot_type == PLOT_CUMULATIVE_LINE:
+                fig = make_cumulative_line_chart(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    x_semantic=x_sem,
+                    sem_date_value=sem_date_value,
                     to_datetime_fn=to_datetime_fn,
                 )
 

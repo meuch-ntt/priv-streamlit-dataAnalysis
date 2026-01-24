@@ -11,7 +11,6 @@ import data_loader
 import data_transforms as transforms
 import kpis
 import plotting
-import section_changing_types  # new: extracted "Changing the Type" UI
 
 from pandas.api.types import (
     is_categorical_dtype,
@@ -41,7 +40,6 @@ TARGET_DATETIME = transforms.TARGET_DATETIME
 TARGET_DATE = SEM_DATE  # date-only semantics stored separately; underlying dtype stays datetime normalized
 TARGET_CATEGORY = transforms.TARGET_CATEGORY
 TARGET_TEXT = transforms.TARGET_TEXT
-TARGET_OPTIONS = [TARGET_NUMBER, TARGET_DATETIME, TARGET_DATE, TARGET_CATEGORY]
 
 # Aggregations
 AGG_SUM = "sum"
@@ -79,18 +77,17 @@ folder_path = f"{working_dir}/data"
     msg_no_files_found=MSG_NO_FILES_FOUND,
 )
 
-type_overrides, column_semantics = dataset_selector.get_dataset_state(dataset_key)
-
 try:
-    df = transforms.load_derived_df_cached(
+    raw_df = data_loader.load_raw_df_cached(
         file_path,
         ext,
         sheet_name,
         token,
-        transforms.freeze_dict(type_overrides),
-        transforms.freeze_dict(column_semantics),
-        _load_raw_df_fn=data_loader.load_raw_df_cached,
     )
+
+    inferred_types, column_semantics = transforms.infer_types_and_semantics(raw_df)
+    df = transforms.apply_inferred_types(raw_df, inferred_types, column_semantics)
+
 except Exception as e:
     st.error(MSG_NO_DATA_LOADED)
     st.exception(e)
@@ -110,6 +107,10 @@ st.write("This is a preview of the data with the first rows and current type int
 def _preview_type_for_column(current_df: pd.DataFrame, col: str) -> str:
     if column_semantics.get(col) == SEM_DATE:
         return TARGET_DATE
+
+    t = inferred_types.get(col)
+    if t:
+        return t
 
     s = current_df[col]
     if is_categorical_dtype(s):
@@ -143,19 +144,9 @@ def render_preview(current_df: pd.DataFrame) -> pd.DataFrame:
 
 st.dataframe(render_preview(df))
 
-# ==============================================================================
-# Changing the Type
-# ==============================================================================
-
-section_changing_types.set(
-    columns=columns,
-    target_options=TARGET_OPTIONS,
-    target_datetime_value=TARGET_DATETIME,
-    target_date_value=TARGET_DATE,
-    sem_date_value=SEM_DATE,
-    type_overrides=type_overrides,
-    column_semantics=column_semantics,
-)
+# available for downstream modules (Optional)
+st.session_state["inferred_types"] = inferred_types
+st.session_state["column_semantics"] = column_semantics
 
 # ==============================================================================
 # Data Analysis Selection

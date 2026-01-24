@@ -1,8 +1,3 @@
-// ONLY AT END
-Refactoring: devide big main into smaller .py files 
-
-product name as category, doesnt make sense .. too many classes...
-
 ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated 
     - remove type category -> consider object instead 
         remove category, all text category, except, more than 10 values?
@@ -14,9 +9,11 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
 // Premium: AGENT, read Data, agent does everything, user has no idea about data
 
 
-// CONE 24.01 
-refactoring many small .py files
+// DONE 24.01 (2)
+type auto-detection
 
+// DONE 24.01 (1)
+Refactoring: devide big main into smaller .py files 
 
 // DONE 16.01 
 Visualisations: X, Y and aggregation: Naming/ user Friendly & logic: show only column with relevant data type
