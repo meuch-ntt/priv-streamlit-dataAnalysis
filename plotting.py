@@ -34,9 +34,42 @@ PLOT_LABELS = {
     PLOT_CUMULATIVE_LINE: "Growth over time (cumulative)",
     PLOT_SCATTER: "Relationship between two metrics (correlation)",
     PLOT_HIST: "Value distribution",
-    PLOT_HEATMAP: "Heatmap (limited to Top 20 categories)",
+    PLOT_HEATMAP: "Top categories (heatmap)",
     # Treemap label is dynamic (depends on computed coverage_pct), so handled in UI
 }
+
+def plot_label(
+    plot_type: str,
+    *,
+    treemap_coverage_pct: Optional[int] = None,
+    x_distinct_count: Optional[int] = None,
+    limit_n: int = 20,
+) -> str:
+    """
+    Single source of truth for plot labels used in BOTH:
+    - Visual type dropdown
+    - Caption before the chart
+
+    - Treemap label is dynamic (coverage %)
+    - Table/Heatmap label optionally shows "Top 20" when the selected text breakdown
+      has > 20 distinct values.
+    """
+    if plot_type == PLOT_TREEMAP:
+        x_pct = treemap_coverage_pct if treemap_coverage_pct is not None else 0
+        return f"Treemap limited to groups driving {x_pct}% of the result"
+
+    base = PLOT_LABELS.get(plot_type, plot_type)
+
+    # Add "Top 20" only when it actually applies (distinct values > 20)
+    if plot_type in (PLOT_TOPN_TABLE, PLOT_HEATMAP):
+        if (x_distinct_count is not None) and (x_distinct_count > limit_n):
+            # Convert:
+            # "Top categories (table)"   -> "Top 20 categories (table)"
+            # "Top categories (heatmap)" -> "Top 20 categories (heatmap)"
+            return base.replace("Top categories", f"Top {limit_n} categories")
+
+    return base
+
 
 
 # ==============================================================================
@@ -785,6 +818,9 @@ def render_visualizations_section(
         x_is_cat = is_categorical_dtype(x_s)
         x_is_num = is_numeric_dtype(x_s)
         x_is_text = (x_s.dtype == "string") or (x_s.dtype == "object")
+        x_distinct_count: Optional[int] = None
+        if mode == "Compare categories" and x_is_text:
+            x_distinct_count = int(df[x_axis].astype(str).nunique(dropna=True))
 
         # can_heatmap/can_treemap only for Compare categories + text breakdown
         heatmap_options = [c for c in (cat_cols + text_cols) if c != x_axis]
@@ -822,16 +858,6 @@ def render_visualizations_section(
             st.warning("No compatible charts for the selected fields.")
             return
 
-        # Local plot labels (so UI text can depend on the selected x-axis type)
-        plot_labels_ui = dict(PLOT_LABELS)
-        if x_is_text:
-            plot_labels_ui[PLOT_TOPN_TABLE] = "Top categories (table, limited to Top 20)"
-
-        # Dynamic treemap label (includes X = coverage_pct)
-        if can_treemap:
-            x_pct = treemap_coverage_pct if treemap_coverage_pct is not None else 0
-            plot_labels_ui[PLOT_TREEMAP] = f"Treemap limited to the groups driving {x_pct}% of the result"
-
         if len(plot_list) == 1:
             plot_type = plot_list[0]
         else:
@@ -839,7 +865,11 @@ def render_visualizations_section(
                 "Visual type",
                 options=plot_list,
                 index=_auto_index_for_single_option(plot_list),
-                format_func=lambda p: plot_labels_ui.get(p, p),
+                format_func=lambda p: plot_label(
+                    p,
+                    treemap_coverage_pct=treemap_coverage_pct,
+                    x_distinct_count=x_distinct_count,
+                ),
                 placeholder="Choose",
                 key=plot_key,
             )
@@ -866,11 +896,11 @@ def render_visualizations_section(
 
         agg_part = f" ({agg_func})" if agg_func else ""
 
-        # caption title uses the same UI label mapping where possible
-        caption_label = PLOT_LABELS.get(plot_type, plot_type)
-        if plot_type == PLOT_TREEMAP:
-            x_pct = treemap_coverage_pct if treemap_coverage_pct is not None else 0
-            caption_label = f"Treemap limited to the groups driving {x_pct}% of the result"
+        caption_label = plot_label(
+            plot_type,
+            treemap_coverage_pct=treemap_coverage_pct,
+            x_distinct_count=x_distinct_count,
+        )
 
         title = f"{caption_label}: {y_axis}{agg_part} by {x_axis}"
 

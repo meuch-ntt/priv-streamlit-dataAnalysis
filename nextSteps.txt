@@ -1,3 +1,11 @@
+change on one position only: variable on the top 
+-> Analog to heatmap: ein variable nur  
+
+"summary table ... "
+        if x_is_text:
+            plot_labels_ui[PLOT_TOPN_TABLE] = "Summary table: Top 20 categories"
+
+
 WORDING Visualisations  
 which calculation
 
