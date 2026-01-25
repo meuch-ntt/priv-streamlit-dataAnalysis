@@ -1,10 +1,17 @@
+WORDING Visualisations  
+which calculation
+
+Breakdown: How do you want to break the measure down?
+-> Category
+
+Pick a field to group results by (x-axis)
+-> How do you want to break the measure down (x-axis)
+
+--------
+
 add explanation for data preview,type of data: category vs text 
-BUG: i should not offerbar chart for text 
 
 also when one only graph type possible, show it selected
-
-
-explain heat map hat only 20 categories
 
 TOP-N
 
@@ -13,15 +20,11 @@ text field -> category like
 type of analysis 3D 
 - 
 
+fix Crash
 metric - metric relationship
 - same same -> error  
 
 advanced analysis
-- 2D: heat map
-  add new graph type: heat mep, if x axis: text: 
-  Top columns: all possible 
-
-
 - 2D: stacked bar chart
 - histogram
 - sepecif analysis, gimme datapoint having value X = "abc"/ >= 
@@ -40,6 +43,8 @@ ANOTHER BRANCH/ ANOTHER SOFTWARE VERSION - user not educated
 PUSH
 -----------------------------
 // DONE 25.01
+hint TOP 20 for Text fields
+no bar chart for text fields
 heatmap NEW
 table visual
 kpi.py category-like

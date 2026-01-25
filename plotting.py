@@ -9,7 +9,9 @@ import streamlit as st
 from pandas.api.types import is_categorical_dtype, is_datetime64_any_dtype, is_numeric_dtype
 
 
+# ==============================================================================
 # Plot names (internal)
+# ==============================================================================
 PLOT_BAR = "Bar Chart"
 PLOT_PIE = "Pie Chart"
 PLOT_LINE = "Line Chart"
@@ -18,8 +20,12 @@ PLOT_SCATTER = "Scatter Plot"
 PLOT_HIST = "Distribution"
 PLOT_TOPN_TABLE = "Summary Table"
 PLOT_HEATMAP = "Heatmap"
+PLOT_TREEMAP = "Treemap"  # NEW
 
+
+# ==============================================================================
 # Business-friendly labels (UI only)
+# ==============================================================================
 PLOT_LABELS = {
     PLOT_BAR: "Top categories (bar chart)",
     PLOT_TOPN_TABLE: "Top categories (table)",
@@ -28,8 +34,24 @@ PLOT_LABELS = {
     PLOT_CUMULATIVE_LINE: "Growth over time (cumulative)",
     PLOT_SCATTER: "Relationship between two metrics (correlation)",
     PLOT_HIST: "Value distribution",
-    PLOT_HEATMAP: "Heatmap (two categories)",
+    PLOT_HEATMAP: "Heatmap (limited to Top 20 categories)",
+    # Treemap label is dynamic (depends on computed coverage_pct), so handled in UI
 }
+
+
+# ==============================================================================
+# Treemap controls (from your testing script)
+# ==============================================================================
+TREEMAP_PARETO_SHARE = 0.80
+TREEMAP_MAX_CATEGORIES = 85
+
+TREEMAP_TOP_N1 = 10
+TREEMAP_TOP_N2 = 40
+TREEMAP_CHARS_TOP1 = 25
+TREEMAP_CHARS_TOP2 = 15
+TREEMAP_CHARS_REST = 10
+
+TREEMAP_ROTATE_IF_WIDTH_BELOW = 5.0  # tweak: 4.0 fewer rotations, 6.0 more
 
 
 def compatible_plots(
@@ -42,6 +64,7 @@ def compatible_plots(
     agg_func: Optional[str],
     agg_sum_value: str,
     can_heatmap: bool,
+    can_treemap: bool,  # NEW
 ) -> list[str]:
     """
     Decide which plots are compatible with the current x/y selection.
@@ -60,6 +83,8 @@ def compatible_plots(
         plots.append(PLOT_TOPN_TABLE)
         if can_heatmap:
             plots.append(PLOT_HEATMAP)
+        if can_treemap:
+            plots.append(PLOT_TREEMAP)
 
     # Date × Numeric
     if x_is_date_like and y_is_numeric:
@@ -146,11 +171,13 @@ def make_category_summary_table(
     agg_func: str,
     agg_sum_value: str,
     agg_avg_value: str,
-    top_rows: int = 20,
+    top_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Create a category summary table:
     aggregated metric (y) using agg_func by category (x), sorted highest first.
+
+    If top_rows is None, returns ALL rows (no limit).
     """
     if agg_func == agg_sum_value:
         out = df.groupby(x_axis)[y_axis].sum().reset_index(name=agg_sum_value)
@@ -162,7 +189,10 @@ def make_category_summary_table(
         raise ValueError(f"Unsupported aggregation: {agg_func}")
 
     out[x_axis] = out[x_axis].astype(str)
-    out = out.sort_values(by=value_col, ascending=False).head(top_rows)
+    out = out.sort_values(by=value_col, ascending=False)
+
+    if top_rows is not None:
+        out = out.head(int(top_rows))
 
     out.insert(0, "Rank", range(1, len(out) + 1))
     return out
@@ -404,6 +434,119 @@ def make_heatmap(
     return fig
 
 
+def make_treemap_pareto_text_breakdown(
+    df: pd.DataFrame,
+    *,
+    x_axis: str,
+    y_axis: str,
+    agg_func: str,
+    agg_sum_value: str,
+    agg_avg_value: str,
+    pareto_share: float = TREEMAP_PARETO_SHARE,
+    max_categories: int = TREEMAP_MAX_CATEGORIES,
+) -> tuple[plt.Figure, int]:
+    """
+    Treemap for text breakdowns:
+    Shows up to `max_categories` groups, chosen as the smallest set that reaches `pareto_share`
+    (capped), with the remainder aggregated as 'Rest'.
+
+    Returns: (figure, coverage_pct)
+    """
+    import squarify  # lazy import
+
+    if agg_func == agg_sum_value:
+        agg = df.groupby(x_axis, as_index=False)[y_axis].sum()
+    elif agg_func == agg_avg_value:
+        agg = df.groupby(x_axis, as_index=False)[y_axis].mean()
+    else:
+        raise ValueError(f"Unsupported aggregation: {agg_func}")
+
+    agg = (
+        agg.rename(columns={y_axis: "value"})
+           .dropna(subset=[x_axis, "value"])
+    )
+    agg[x_axis] = agg[x_axis].astype(str)
+    agg = agg.sort_values("value", ascending=False).reset_index(drop=True)
+    distinct_products = agg[x_axis].nunique()
+
+    total_val = agg["value"].sum()
+    if total_val == 0 or pd.isna(total_val):
+        fig, ax = plt.subplots(figsize=(16, 9))
+        ax.text(0.5, 0.5, "No data to display.", ha="center", va="center")
+        ax.axis("off")
+        fig.tight_layout()
+        return fig, 0
+
+    agg["cum_share"] = agg["value"].cumsum() / total_val
+    k = int((agg["cum_share"] < pareto_share).sum() + 1)
+    top_n = min(k, max_categories)
+
+    top_df = agg.head(top_n)[[x_axis, "value"]]
+    rest_val = agg.iloc[top_n:]["value"].sum()
+
+    coverage_pct = round((top_df["value"].sum() / total_val) * 100)
+
+    treemap_df = pd.concat(
+        [top_df, pd.DataFrame([{x_axis: "Rest", "value": rest_val}])],
+        ignore_index=True,
+    )
+
+    # label truncation (same logic as your notebook)
+    def _trunc(s: str, n: int) -> str:
+        return (s[:n] + "…") if len(s) > n else s
+
+    labels: list[str] = []
+    for i, name in enumerate(treemap_df[x_axis].tolist()):
+        if name == "Rest":
+            labels.append("Rest")
+        elif i < TREEMAP_TOP_N1:
+            labels.append(_trunc(name, TREEMAP_CHARS_TOP1))
+        elif i < TREEMAP_TOP_N2:
+            labels.append(_trunc(name, TREEMAP_CHARS_TOP2))
+        else:
+            labels.append(_trunc(name, TREEMAP_CHARS_REST))
+
+    # Draw using squarify.plot to preserve layout/colors, then overlay rotated labels
+    fig = plt.figure(figsize=(16, 9))
+    ax = plt.gca()
+
+    squarify.plot(
+        sizes=treemap_df["value"],
+        label=None,  # overlay labels ourselves
+        alpha=0.85,
+        ax=ax,
+    )
+
+    sizes = treemap_df["value"].tolist()
+    norm_sizes = squarify.normalize_sizes(sizes, 100, 100)
+    rects = squarify.squarify(norm_sizes, 0, 0, 100, 100)
+
+    for i, r in enumerate(rects):
+        x, y, dx, dy = r["x"], r["y"], r["dx"], r["dy"]
+        rotate = (labels[i] != "Rest" and dx < TREEMAP_ROTATE_IF_WIDTH_BELOW)
+
+        ax.text(
+            x + dx / 2,
+            y + dy / 2,
+            labels[i],
+            ha="center",
+            va="center",
+            rotation=90 if rotate else 0,
+            fontsize=10,
+            clip_on=True,
+        )
+
+    ax.set_title(
+        f"{y_axis} by {x_axis}: "
+        f"Top {top_n} (out of {distinct_products}) covers {coverage_pct}% of the result",
+        fontsize=16
+    )
+
+    ax.axis("off")
+    fig.tight_layout()
+    return fig, coverage_pct
+
+
 def _numeric_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if is_numeric_dtype(df[c])]
 
@@ -442,10 +585,10 @@ def _auto_index_for_single_option(options: list[str]) -> Optional[int]:
     """
     return 0 if len(options) == 1 else None
 
+
 def _label_breakdown_option(col: str, *, text_cols: list[str]) -> str:
-    if col in text_cols:
-        return f"{col} (limited to Top 20)"
     return col
+
 
 def _is_text_field(col: str, *, text_cols: list[str]) -> bool:
     return col in text_cols
@@ -596,12 +739,12 @@ def render_visualizations_section(
             st.stop()
 
         x_axis = st.selectbox(
-            "Breakdown: How do you want to break the measure down?",
+            "Group by (Category)",
             options=compare_options,
             index=_auto_index_for_single_option(compare_options),
             placeholder="Choose a field",
             format_func=lambda c: _label_breakdown_option(c, text_cols=text_cols),
-            help="Pick a field to group results by (x-axis).",
+            help="How do you want to break the measure down (x-axis).",
             key=x_key,
         )
 
@@ -629,6 +772,9 @@ def render_visualizations_section(
     HEAT_TOP_ROWS = 20
     HEAT_TOP_COLS = 20
 
+    # For dynamic Treemap label text in "Visual type"
+    treemap_coverage_pct: Optional[int] = None
+
     if ready:
         y_is_numeric = is_numeric_dtype(df[y_axis])
 
@@ -640,8 +786,25 @@ def render_visualizations_section(
         x_is_num = is_numeric_dtype(x_s)
         x_is_text = (x_s.dtype == "string") or (x_s.dtype == "object")
 
+        # can_heatmap/can_treemap only for Compare categories + text breakdown
         heatmap_options = [c for c in (cat_cols + text_cols) if c != x_axis]
         can_heatmap = (mode == "Compare categories") and x_is_text and (len(heatmap_options) > 0)
+        can_treemap = (mode == "Compare categories") and x_is_text
+
+        # Precompute coverage_pct for dynamic Treemap label (lightweight groupby)
+        if can_treemap and y_is_numeric:
+            try:
+                _, treemap_coverage_pct = make_treemap_pareto_text_breakdown(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    agg_func=agg_func,
+                    agg_sum_value=agg_sum_value,
+                    agg_avg_value=agg_avg_value,
+                )
+                plt.close("all")
+            except Exception:
+                treemap_coverage_pct = None
 
         plot_list = compatible_plots(
             x_is_categorical=x_is_cat,
@@ -652,11 +815,22 @@ def render_visualizations_section(
             agg_func=agg_func,
             agg_sum_value=agg_sum_value,
             can_heatmap=can_heatmap,
+            can_treemap=can_treemap,
         )
 
         if not plot_list:
             st.warning("No compatible charts for the selected fields.")
             return
+
+        # Local plot labels (so UI text can depend on the selected x-axis type)
+        plot_labels_ui = dict(PLOT_LABELS)
+        if x_is_text:
+            plot_labels_ui[PLOT_TOPN_TABLE] = "Top categories (table, limited to Top 20)"
+
+        # Dynamic treemap label (includes X = coverage_pct)
+        if can_treemap:
+            x_pct = treemap_coverage_pct if treemap_coverage_pct is not None else 0
+            plot_labels_ui[PLOT_TREEMAP] = f"Treemap limited to the groups driving {x_pct}% of the result"
 
         if len(plot_list) == 1:
             plot_type = plot_list[0]
@@ -665,7 +839,7 @@ def render_visualizations_section(
                 "Visual type",
                 options=plot_list,
                 index=_auto_index_for_single_option(plot_list),
-                format_func=lambda p: PLOT_LABELS.get(p, p),
+                format_func=lambda p: plot_labels_ui.get(p, p),
                 placeholder="Choose",
                 key=plot_key,
             )
@@ -690,17 +864,15 @@ def render_visualizations_section(
         st.session_state.viz_has_generated = True
         info_slot.empty()
 
-        # Hint for text-based breakdowns
-        hint = ""
-        if mode == "Compare categories" and _is_text_field(x_axis, text_cols=text_cols):
-            hint = " (limited to Top 20)"
-
         agg_part = f" ({agg_func})" if agg_func else ""
 
-        title = (
-            f"{PLOT_LABELS.get(plot_type, plot_type)}: "
-            f"{y_axis}{agg_part} by {x_axis}{hint}"
-        )
+        # caption title uses the same UI label mapping where possible
+        caption_label = PLOT_LABELS.get(plot_type, plot_type)
+        if plot_type == PLOT_TREEMAP:
+            x_pct = treemap_coverage_pct if treemap_coverage_pct is not None else 0
+            caption_label = f"Treemap limited to the groups driving {x_pct}% of the result"
+
+        title = f"{caption_label}: {y_axis}{agg_part} by {x_axis}"
 
         if plot_type == PLOT_HEATMAP and heatmap_by is not None:
             title += f" and {heatmap_by}"
@@ -782,6 +954,18 @@ def render_visualizations_section(
                     agg_avg_value=agg_avg_value,
                     top_rows=HEAT_TOP_ROWS,
                     top_cols=HEAT_TOP_COLS,
+                )
+                st.pyplot(fig)
+                plt.close(fig)
+
+            elif plot_type == PLOT_TREEMAP:
+                fig, treemap_coverage_pct = make_treemap_pareto_text_breakdown(
+                    df,
+                    x_axis=x_axis,
+                    y_axis=y_axis,
+                    agg_func=agg_func,
+                    agg_sum_value=agg_sum_value,
+                    agg_avg_value=agg_avg_value,
                 )
                 st.pyplot(fig)
                 plt.close(fig)
